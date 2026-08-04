@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marsad-demo
+  labels:
+    env: demo
+    kubernetes.io/metadata.name: marsad-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marsad-demo-edge
+  labels:
+    env: demo
+    tier: edge
+    kubernetes.io/metadata.name: marsad-demo-edge

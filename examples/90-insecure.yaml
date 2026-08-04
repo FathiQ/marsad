@@ -1,0 +1,91 @@
+# Every policy in this file is wrong on purpose. Apply it to see the findings
+# panel light up; do not copy any of it.
+---
+# CRITICAL: an empty `from` list means ALL sources, including outside the
+# cluster. This is an internet-facing database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-db-open-to-world
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  policyTypes:
+    - Ingress
+  ingress:
+    - {}
+---
+# HIGH: unrestricted egress on every port to every destination. Exfiltration has
+# no obstacle here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-egress-anywhere
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+---
+# MEDIUM: an entire namespace with no podSelector, and no ports, so every pod in
+# marsad-demo-edge reaches every port of every api pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-whole-namespace-allowed
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              tier: edge
+---
+# MEDIUM: an endPort range spanning thousands of ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-huge-port-range
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: db
+      ports:
+        - protocol: TCP
+          port: 1024
+          endPort: 65535
+---
+# LOW: selects nothing. Typically label drift after a rename — the policy looks
+# like protection but is inert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-dead-policy
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: api-v1-renamed-away
+  policyTypes:
+    - Ingress

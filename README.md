@@ -1,0 +1,83 @@
+# Marsad
+
+**Marsad — the observatory for your Kubernetes network policies.**
+
+Marsad (مرصد, *"observatory"*) is a read-only web dashboard that shows what your
+cluster's network security posture actually *is*, according to the policies you
+have declared. It renders an interactive graph of your workloads, the ingress and
+egress rules that apply to them — including AWS domain-based egress — and flags
+what is insecure or simply broken.
+
+It reads declared configuration, not live traffic. Nothing is ever mutated: every
+call to the Kubernetes API is get, list, or watch.
+
+<!-- TODO: demo GIF -->
+
+## Why
+
+Reading a cluster's NetworkPolicies by hand goes wrong in predictable ways. A
+`namespaceSelector` and a `podSelector` in one peer are ANDed; split across two
+peers they are ORed, and the policy is far broader than intended. A policy with
+only egress rules and no `policyTypes` silently denies *all* ingress. A pod that
+no policy selects is wide open in both directions, and nothing in `kubectl get
+netpol` tells you that.
+
+Marsad answers those questions from the configuration itself, and for every edge
+it draws, it can point at the exact rule that produced it.
+
+## Status
+
+Early. The evaluation core (`pkg/npeval`) is built and tested; the API server and
+frontend are not yet. See [docs/design/npeval.md](docs/design/npeval.md) for the
+semantics it implements and [the build order](#build-order) for what comes next.
+
+## Supported policy types
+
+| Type | Support |
+|---|---|
+| `networking.k8s.io/v1` NetworkPolicy | full — ipBlock, selectors, ports, endPort, named ports, both policyTypes |
+| `networking.k8s.aws/v1alpha1` ApplicationNetworkPolicy | full — including `domainNames` egress. Detected via discovery; on non-EKS clusters Marsad degrades cleanly and says so |
+| Cilium / Calico policies | not in v1. `npeval.Provider` exists so they can be added without touching the evaluator |
+
+## Development
+
+Everything runs in Docker — no Go, Node, or Kubernetes tooling on your machine.
+
+```sh
+make test    # run the test suite
+make lint    # golangci-lint
+make help    # all targets
+```
+
+See [docs/development.md](docs/development.md).
+
+## Architecture
+
+- **Backend (Go, single static binary).** client-go shared informers watch
+  policies and workloads; the graph is recomputed incrementally on change, never
+  polled. The frontend is embedded via `embed.FS`.
+- **`pkg/npeval`** is the semantic core, and deliberately has no HTTP, no UI and
+  no client-go dependency — it evaluates an immutable snapshot of objects a
+  caller has already fetched. That is what lets the same code back the server, a
+  CLI, and a CI check.
+- **Frontend (React + TypeScript + Vite)** with a WebGL graph renderer, so
+  clusters with thousands of pods stay interactive. The default view aggregates
+  at the namespace level and drills down to workloads, then pods, on demand.
+
+## Security
+
+Marsad requires only `get`, `list` and `watch`. A minimal ClusterRole ships with
+the Helm chart. There is no write path in the codebase — not a disabled one, an
+absent one.
+
+## Build order
+
+1. ✅ `pkg/npeval` — policy evaluation core, with tests
+2. Informer layer, graph model, REST + WebSocket API
+3. Frontend graph: namespace level, then drill-down
+4. Findings engine and its UI surfacing
+5. Simulate panel, exports, Helm chart, CI polish
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).

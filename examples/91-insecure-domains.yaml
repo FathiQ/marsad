@@ -1,0 +1,18 @@
+# MEDIUM: the wildcard spans whole labels, so *.amazonaws.com reaches every AWS
+# service in every region — S3, EC2, STS, everything. Scope domain allowlists to
+# the specific service and region you need.
+apiVersion: networking.k8s.aws/v1alpha1
+kind: ApplicationNetworkPolicy
+metadata:
+  name: bad-broad-wildcard
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - domainNames:
+            - "*.amazonaws.com"

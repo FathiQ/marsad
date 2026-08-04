@@ -1,0 +1,49 @@
+name: marsad
+
+# Every toolchain Marsad needs lives in a container. Nothing is installed on the
+# host. See docs/development.md.
+
+services:
+  # Go toolchain: build, test, run the backend.
+  go:
+    image: golang:1.24-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      # Read-only kubeconfig, for `make dev` against your current cluster.
+      - ${KUBECONFIG:-${HOME}/.kube/config}:/root/.kube/config:ro
+    environment:
+      CGO_ENABLED: "0"
+      GOFLAGS: -buildvcs=false
+      KUBECONFIG: /root/.kube/config
+    ports:
+      - "8080:8080"
+
+  # Node toolchain: Vite dev server, ESLint, Playwright.
+  web:
+    image: node:22-bookworm
+    working_dir: /src/web
+    volumes:
+      - .:/src
+      - web-node-modules:/src/web/node_modules
+    ports:
+      - "5173:5173"
+
+  lint:
+    image: golangci/golangci-lint:v2.1.6
+    working_dir: /src
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      - golangci:/root/.cache/golangci-lint
+    environment:
+      GOFLAGS: -buildvcs=false
+
+volumes:
+  go-mod:
+  go-build:
+  web-node-modules:
+  golangci:

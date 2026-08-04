@@ -1,0 +1,29 @@
+# AWS VPC CNI domain-based egress. Requires the
+# applicationnetworkpolicies.networking.k8s.aws CRD; without it, Marsad shows the
+# "domain policies not available on this cluster" badge instead of guessing.
+#
+# ApplicationNetworkPolicy is an independent policy layer, not extra rules in the
+# NetworkPolicy pool: the pod must satisfy both. Marsad shows each layer
+# separately for exactly this reason.
+apiVersion: networking.k8s.aws/v1alpha1
+kind: ApplicationNetworkPolicy
+metadata:
+  name: api-allow-aws-services
+  namespace: marsad-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        # The wildcard matches one or more WHOLE labels, so this reaches
+        # anything.s3.me-south-1.amazonaws.com at any depth — but not other
+        # regions and not other AWS services.
+        - domainNames:
+            - "*.s3.me-south-1.amazonaws.com"
+            - "sts.me-south-1.amazonaws.com"
+      ports:
+        - protocol: TCP
+          port: 443

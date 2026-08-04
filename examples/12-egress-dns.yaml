@@ -1,0 +1,25 @@
+# An egress-isolated pod cannot resolve names until something allows port 53.
+# Forgetting this is the most common way a "correct" policy set breaks an app,
+# so Marsad reports it as a misconfiguration rather than a security finding.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: marsad-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

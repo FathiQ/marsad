@@ -1,0 +1,12 @@
+# The canonical starting point: an empty podSelector selects every pod in the
+# namespace, and rules that are absent mean deny — not allow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: marsad-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
