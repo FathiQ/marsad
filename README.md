@@ -66,6 +66,26 @@ make help    # all targets
 
 See [docs/development.md](docs/development.md).
 
+## Deploying
+
+```sh
+# once, if you use ECR
+aws ecr create-repository --repository-name marsad --region <region>
+aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
+
+make push deploy REGISTRY=<account>.dkr.ecr.<region>.amazonaws.com/marsad
+kubectl -n marsad port-forward svc/marsad 8080:80
+```
+
+Images are tagged and deployed by commit, not by a floating tag, so a running
+pod is traceable to a revision. The build cross-compiles, so an arm64 laptop
+produces an amd64 image for amd64 nodes in seconds rather than minutes under
+emulation — set `PLATFORM` if your nodes are Graviton.
+
+`make undeploy` removes everything. There is no Ingress and no authentication in
+v1 by design: reach it with `port-forward`, which reuses the cluster's own authn
+and authz rather than inventing a second, weaker one.
+
 ## Architecture
 
 - **Backend (Go, single static binary).** client-go shared informers watch
