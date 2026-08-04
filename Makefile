@@ -27,6 +27,18 @@ cover:
 tidy:
 	$(GO) go mod tidy
 
+## vuln: scan for known vulnerabilities with govulncheck
+#
+# ECR basic scanning cannot read a distroless image: it looks for OS package
+# metadata and there is no package manager to provide any. govulncheck works on
+# the module graph instead, and reports only vulnerabilities that are actually
+# reachable from this code.
+.PHONY: vuln
+vuln:
+	# GOTOOLCHAIN=auto lets Go fetch whatever toolchain govulncheck requires; the
+	# scanner should track upstream rather than be pinned to a stale release.
+	$(GO) sh -c 'GOTOOLCHAIN=auto go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
+
 ## lint: golangci-lint
 .PHONY: lint
 lint:
@@ -68,7 +80,8 @@ KIND_CLUSTER ?= marsad
 ## image: build the container image ($(IMAGE):$(TAG), PLATFORM=$(PLATFORM))
 .PHONY: image
 image:
-	docker build --platform '$(PLATFORM)' --build-arg VERSION='$(TAG)' -t '$(IMAGE):$(TAG)' .
+	docker build --platform '$(PLATFORM)' --provenance=false --sbom=false \
+		--build-arg VERSION='$(TAG)' -t '$(IMAGE):$(TAG)' .
 
 ## kind-deploy: build, load and deploy into the local kind cluster
 .PHONY: kind-deploy
@@ -108,8 +121,12 @@ kind-down:
 ## push: build the amd64 image and push it to $(REGISTRY)
 .PHONY: push
 push: require-registry
-	docker build --platform linux/amd64 --build-arg VERSION='$(GIT_SHA)' \
-		-t '$(REGISTRY):$(GIT_SHA)' .
+	# --provenance/--sbom off: with one platform the attestation only produces a
+	# stray unknown/unknown manifest that registries surface as a phantom
+	# artifact. Vulnerability coverage comes from `make vuln`, not from an SBOM
+	# attachment the registry scanner cannot read anyway.
+	docker build --platform linux/amd64 --provenance=false --sbom=false \
+		--build-arg VERSION='$(GIT_SHA)' -t '$(REGISTRY):$(GIT_SHA)' .
 	docker push '$(REGISTRY):$(GIT_SHA)'
 
 ## deploy: apply the manifests to $(KUBE_CONTEXT) using the pushed image
