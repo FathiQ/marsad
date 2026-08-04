@@ -2,6 +2,7 @@
 
 COMPOSE := docker compose
 GO      := $(COMPOSE) run --rm go
+DEV     := $(COMPOSE) run --rm --service-ports dev
 NODE    := $(COMPOSE) run --rm web
 
 .DEFAULT_GOAL := help
@@ -40,6 +41,16 @@ fmt:
 .PHONY: build
 build:
 	$(GO) go build -o bin/marsad ./cmd/marsad
+
+## dev: run the backend against your current kubeconfig on :8080
+.PHONY: dev
+dev:
+	$(DEV) go run ./cmd/marsad -log-level=debug $(ARGS)
+
+## dev-shell: shell into the cluster-capable dev container
+.PHONY: dev-shell
+dev-shell:
+	$(COMPOSE) run --rm dev bash
 
 ## sh: shell into the Go container
 .PHONY: sh

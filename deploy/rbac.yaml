@@ -1,0 +1,66 @@
+# Minimal permissions for Marsad.
+#
+# Every verb here is a read. Marsad has no write path in its code — not a
+# disabled one, an absent one — and this ClusterRole is the second half of that
+# guarantee: even a compromised Marsad cannot change anything through the API.
+#
+# It is cluster-scoped because network policy is only meaningful across
+# namespaces: a peer in one namespace is selected by a policy in another, and a
+# namespaceSelector matches labels on Namespace objects themselves.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: marsad
+  namespace: marsad
+  labels:
+    app.kubernetes.io/name: marsad
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: marsad
+  labels:
+    app.kubernetes.io/name: marsad
+rules:
+  # Namespaces carry the labels a namespaceSelector matches. Pods are needed to
+  # find workloads no controller owns, and to count live replicas.
+  - apiGroups: [""]
+    resources: [namespaces, pods, services]
+    verbs: [get, list, watch]
+
+  # Controllers supply the pod template labels that policies actually select on.
+  # ReplicaSets are read only to walk Pod → ReplicaSet → Deployment; they never
+  # appear in the graph.
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
+
+  # AWS VPC CNI domain-based egress. Absent outside EKS; Marsad detects that
+  # through the discovery API and degrades cleanly, so this rule is harmless on
+  # clusters without the CRD.
+  - apiGroups: [networking.k8s.aws]
+    resources: [applicationnetworkpolicies]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: marsad
+  labels:
+    app.kubernetes.io/name: marsad
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: marsad
+subjects:
+  - kind: ServiceAccount
+    name: marsad
+    namespace: marsad

@@ -27,9 +27,23 @@ it draws, it can point at the exact rule that produced it.
 
 ## Status
 
-Early. The evaluation core (`pkg/npeval`) is built and tested; the API server and
-frontend are not yet. See [docs/design/npeval.md](docs/design/npeval.md) for the
-semantics it implements and [the build order](#build-order) for what comes next.
+Early but running. The evaluation core, the cluster watcher and the API are built
+and tested; the frontend is next. `make dev` will point the backend at your
+current kubeconfig and serve the API on :8080.
+
+See [docs/design/npeval.md](docs/design/npeval.md) for the policy semantics it
+implements, and [the build order](#build-order) for what comes next.
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/meta` | cluster capabilities, object counts, anything Marsad could not read |
+| `GET /api/namespaces` | per-namespace workload, policy and unprotected counts |
+| `GET /api/graph?level=namespace\|workload&namespaces=a,b` | the graph |
+| `GET /api/workloads/{ns}/{name}` | applied policies with YAML, effective rules, isolation |
+| `POST /api/simulate` | would this connection be allowed, and which rule decides |
+| `GET /api/stream` | WebSocket; a fresh graph on every cluster change |
 
 ## Supported policy types
 
@@ -46,6 +60,7 @@ Everything runs in Docker — no Go, Node, or Kubernetes tooling on your machine
 ```sh
 make test    # run the test suite
 make lint    # golangci-lint
+make dev     # run the backend against your current kubeconfig on :8080
 make help    # all targets
 ```
 
@@ -73,7 +88,7 @@ absent one.
 ## Build order
 
 1. ✅ `pkg/npeval` — policy evaluation core, with tests
-2. Informer layer, graph model, REST + WebSocket API
+2. ✅ Informer layer, graph model, REST + WebSocket API
 3. Frontend graph: namespace level, then drill-down
 4. Findings engine and its UI surfacing
 5. Simulate panel, exports, Helm chart, CI polish

@@ -17,16 +17,45 @@ The first run pulls `golang:1.24-bookworm` and downloads modules into a named
 volume, so it takes a minute. Every run after that is fast — the module and
 build caches persist in Docker volumes across invocations.
 
-## Kubeconfig
+## Running against a cluster
 
-`docker-compose.yml` mounts `$KUBECONFIG` (defaulting to `~/.kube/config`)
-read-only into the Go container. Marsad only ever issues get/list/watch calls,
-but the read-only mount makes that structurally true for the dev loop too.
+```sh
+make dev          # backend on http://localhost:8080, against your current context
+make dev-shell    # a shell in the same container
+```
 
-If your kubeconfig references credential plugins on the host (`aws eks get-token`,
-`gke-gcloud-auth-plugin`), those binaries are not in the container. Generate a
-static-token kubeconfig, or run `kubectl proxy` on the host and point the
-container at `host.docker.internal:8001`.
+`make dev` uses the `dev` compose service, built from `docker/dev.Dockerfile`.
+It is separate from the `go` service that runs the tests, so the test loop never
+waits on it.
+
+### Credentials
+
+The dev container mounts `$KUBECONFIG` (defaulting to `~/.kube/config`) and
+`~/.aws`, both read-only. Marsad only ever issues get/list/watch, and the
+read-only mounts make that structurally true of the dev loop as well.
+
+EKS kubeconfigs authenticate through an exec credential plugin — `aws eks
+get-token` — which runs wherever the *client* runs, so the AWS CLI is installed
+in the dev image. Mounting `~/.aws` alone would not be enough.
+
+If startup reports:
+
+```
+The API server rejected the credentials.
+```
+
+your SSO session has expired. Run `aws sso login` (with `--profile` if you use
+one) **on the host**; the refreshed token lands in `~/.aws/sso/cache`, which the
+container already sees.
+
+Set `AWS_PROFILE` in your environment if the cluster needs a non-default profile;
+compose passes it through.
+
+### Other clusters
+
+For a kind cluster, or anything else reachable only at `127.0.0.1` on the host,
+the container will not see it: point `--kubeconfig` at an endpoint reachable from
+inside Docker, or substitute `host.docker.internal` for `127.0.0.1`.
 
 ## Running a single test
 

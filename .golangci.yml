@@ -27,9 +27,11 @@ linters:
 
   exclusions:
     rules:
-      # Table-driven tests repeat literals by design.
+      # Table-driven tests repeat literals by design. bodyclose is a false
+      # positive on httptest.ResponseRecorder.Result(), whose body is an
+      # in-memory buffer with a no-op Close.
       - path: _test\.go
-        linters: [goconst, unparam, errcheck]
+        linters: [goconst, unparam, errcheck, bodyclose]
 
 formatters:
   enable:

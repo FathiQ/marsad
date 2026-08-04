@@ -4,7 +4,8 @@ name: marsad
 # host. See docs/development.md.
 
 services:
-  # Go toolchain: build, test, run the backend.
+  # Go toolchain: build, test, lint. Plain upstream image, so the test loop never
+  # waits on a rebuild.
   go:
     image: golang:1.24-bookworm
     working_dir: /src
@@ -12,12 +13,33 @@ services:
       - .:/src
       - go-mod:/go/pkg/mod
       - go-build:/root/.cache/go-build
-      # Read-only kubeconfig, for `make dev` against your current cluster.
+    environment:
+      CGO_ENABLED: "0"
+      GOFLAGS: -buildvcs=false
+
+  # Runs the backend against a real cluster. Carries the AWS CLI because EKS
+  # kubeconfigs authenticate through an exec plugin that runs client-side.
+  #
+  # Both credential mounts are read-only, and Marsad only ever issues
+  # get/list/watch — the mount makes that structurally true for the dev loop too.
+  dev:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    image: marsad-dev
+    working_dir: /src
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
       - ${KUBECONFIG:-${HOME}/.kube/config}:/root/.kube/config:ro
+      - ${HOME}/.aws:/root/.aws:ro
     environment:
       CGO_ENABLED: "0"
       GOFLAGS: -buildvcs=false
       KUBECONFIG: /root/.kube/config
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_REGION: ${AWS_REGION:-eu-west-2}
     ports:
       - "8080:8080"
 
