@@ -53,6 +53,34 @@ services:
     ports:
       - "5173:5173"
 
+  # Runs the backend against a local kind cluster.
+  #
+  # kind publishes its API server on 127.0.0.1, which a container cannot reach,
+  # so this joins kind's own Docker network and uses the kubeconfig kind
+  # generates for in-network clients (`kind get kubeconfig --internal`).
+  #
+  # A kind cluster with the ApplicationNetworkPolicy CRD installed exercises
+  # every Marsad code path: Marsad reads declared policy through the API server
+  # and never talks to the CNI, so enforcement being absent changes nothing.
+  kind:
+    build:
+      context: .
+      dockerfile: docker/dev.Dockerfile
+    image: marsad-dev
+    working_dir: /src
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+    environment:
+      CGO_ENABLED: "0"
+      GOFLAGS: -buildvcs=false
+      KUBECONFIG: /src/.kube-kind.yaml
+    networks:
+      - kind
+    ports:
+      - "8080:8080"
+
   lint:
     image: golangci/golangci-lint:v2.1.6
     working_dir: /src
@@ -63,6 +91,11 @@ services:
       - golangci:/root/.cache/golangci-lint
     environment:
       GOFLAGS: -buildvcs=false
+
+networks:
+  # Created by kind itself; `make kind-up` ensures it exists.
+  kind:
+    external: true
 
 volumes:
   go-mod:

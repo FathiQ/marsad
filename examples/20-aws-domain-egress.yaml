@@ -5,6 +5,14 @@
 # ApplicationNetworkPolicy is an independent policy layer, not extra rules in the
 # NetworkPolicy pool: the pod must satisfy both. Marsad shows each layer
 # separately for exactly this reason.
+#
+# Note the DNS rule below. It looks redundant — 12-egress-dns.yaml already allows
+# port 53 — but that allowance lives in the NetworkPolicy layer, and this policy
+# constitutes a second layer that permits only 443. Because the layers combine by
+# intersection, an ANP without its own DNS rule silently revokes name resolution,
+# and a pod that cannot resolve *.s3.me-south-1.amazonaws.com cannot reach it
+# either. Run Marsad against this file with and without the DNS rule to see the
+# effective egress change.
 apiVersion: networking.k8s.aws/v1alpha1
 kind: ApplicationNetworkPolicy
 metadata:
@@ -27,3 +35,15 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

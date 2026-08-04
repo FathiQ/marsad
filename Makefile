@@ -52,6 +52,32 @@ dev:
 dev-shell:
 	$(COMPOSE) run --rm dev bash
 
+KIND_CLUSTER ?= marsad
+
+## kind-up: create a local kind cluster with the AWS CRD and the example policies
+.PHONY: kind-up
+kind-up:
+	kind get clusters 2>/dev/null | grep -qx '$(KIND_CLUSTER)' || kind create cluster --name '$(KIND_CLUSTER)' --wait 90s
+	kubectl --context 'kind-$(KIND_CLUSTER)' apply -f deploy/crds/
+	kubectl --context 'kind-$(KIND_CLUSTER)' apply -f examples/
+	kind get kubeconfig --name '$(KIND_CLUSTER)' --internal > .kube-kind.yaml
+	@echo
+	@echo "kind cluster '$(KIND_CLUSTER)' ready. Run: make dev-kind"
+
+## dev-kind: run the backend against the local kind cluster on :8080
+.PHONY: dev-kind
+dev-kind: .kube-kind.yaml
+	$(COMPOSE) run --rm --service-ports kind go run ./cmd/marsad -log-level=debug $(ARGS)
+
+.kube-kind.yaml:
+	kind get kubeconfig --name '$(KIND_CLUSTER)' --internal > $@
+
+## kind-down: delete the local kind cluster
+.PHONY: kind-down
+kind-down:
+	kind delete cluster --name '$(KIND_CLUSTER)'
+	rm -f .kube-kind.yaml
+
 ## sh: shell into the Go container
 .PHONY: sh
 sh:

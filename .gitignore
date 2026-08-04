@@ -4,3 +4,4 @@ node_modules/
 *.out
 .DS_Store
 web/dist/
+.kube-kind.yaml
