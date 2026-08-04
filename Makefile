@@ -52,7 +52,27 @@ dev:
 dev-shell:
 	$(COMPOSE) run --rm dev bash
 
+IMAGE    ?= marsad
+TAG      ?= dev
+PLATFORM ?= linux/amd64
+
 KIND_CLUSTER ?= marsad
+
+## image: build the container image ($(IMAGE):$(TAG), PLATFORM=$(PLATFORM))
+.PHONY: image
+image:
+	docker build --platform '$(PLATFORM)' --build-arg VERSION='$(TAG)' -t '$(IMAGE):$(TAG)' .
+
+## kind-deploy: build, load and deploy into the local kind cluster
+.PHONY: kind-deploy
+kind-deploy:
+	$(MAKE) image PLATFORM=linux/$(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+	kind load docker-image '$(IMAGE):$(TAG)' --name '$(KIND_CLUSTER)'
+	kubectl --context 'kind-$(KIND_CLUSTER)' apply -f deploy/marsad.yaml -f deploy/rbac.yaml
+	kubectl --context 'kind-$(KIND_CLUSTER)' -n marsad rollout restart deploy/marsad
+	kubectl --context 'kind-$(KIND_CLUSTER)' -n marsad rollout status deploy/marsad --timeout=120s
+	@echo
+	@echo "kubectl --context kind-$(KIND_CLUSTER) -n marsad port-forward svc/marsad 8080:80"
 
 ## kind-up: create a local kind cluster with the AWS CRD and the example policies
 .PHONY: kind-up
