@@ -40,10 +40,19 @@ const MAX_W = 268
 const GLYPH = 15
 const RADIUS = 10
 
-/** Below this the text is unreadable, so cards become compact chips. */
-const CHIP_SCALE = 0.62
-/** And below this, dots — at which point the shape of the cluster is the point. */
-const DOT_SCALE = 0.34
+/**
+ * Level-of-detail thresholds, and the clamp that keeps them from thrashing.
+ *
+ * Cards used to scale straight with the camera, which put the chip and dot
+ * thresholds right where the default zoom lands: a small scroll flipped cards in
+ * and out of existence and read as the graph blinking. Drawing is clamped to a
+ * readable band so a card never shrinks to nothing, and the thresholds sit well
+ * clear of where the view normally sits.
+ */
+const MIN_DRAW_SCALE = 0.7
+const MAX_DRAW_SCALE = 1.25
+const CHIP_SCALE = 0.5
+const DOT_SCALE = 0.26
 
 export interface AccessPoint {
   label: string
@@ -353,11 +362,22 @@ export class OverlayRenderer {
     this.frame = 0
   }
 
+  /**
+   * Resize only when the size has actually changed.
+   *
+   * Assigning canvas.width clears the bitmap even when the value is identical.
+   * This is called on every Sigma render, and during a zoom Sigma renders many
+   * times per frame — so an unconditional assignment wiped the overlay between
+   * draws and the cards visibly strobed.
+   */
   resize() {
     const { width, height } = this.sigma.getDimensions()
     const dpr = window.devicePixelRatio || 1
-    this.canvas.width = width * dpr
-    this.canvas.height = height * dpr
+    const w = Math.round(width * dpr)
+    const h = Math.round(height * dpr)
+    if (this.canvas.width === w && this.canvas.height === h) return
+    this.canvas.width = w
+    this.canvas.height = h
     this.canvas.style.width = `${width}px`
     this.canvas.style.height = `${height}px`
   }
@@ -401,7 +421,8 @@ export class OverlayRenderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
-    const scale = this.scale()
+    const zoom = this.scale()
+    const scale = Math.min(MAX_DRAW_SCALE, Math.max(MIN_DRAW_SCALE, zoom))
     const centres = new Map<string, { x: number; y: number }>()
     for (const card of this.cards) {
       const display = this.sigma.getNodeDisplayData(card.id)
@@ -412,9 +433,9 @@ export class OverlayRenderer {
     this.rects = []
     this.curves = []
 
-    if (this.groupsVisible && scale > CHIP_SCALE) this.drawGroups(ctx, centres, scale)
-    this.drawEdges(ctx, centres, scale, elapsed)
-    this.drawCards(ctx, centres, scale)
+    if (this.groupsVisible && zoom > DOT_SCALE) this.drawGroups(ctx, centres, scale)
+    this.drawEdges(ctx, centres, scale, zoom, elapsed)
+    this.drawCards(ctx, centres, scale, zoom)
   }
 
   /**
@@ -504,6 +525,7 @@ export class OverlayRenderer {
     ctx: CanvasRenderingContext2D,
     centres: Map<string, { x: number; y: number }>,
     scale: number,
+    zoom: number,
     elapsed: number,
   ) {
     for (const edge of this.edges) {
@@ -517,7 +539,12 @@ export class OverlayRenderer {
         this.hovered !== null && edge.source !== this.hovered && edge.target !== this.hovered
 
       const start = { x: from.x + (sourceCard.w * scale) / 2, y: from.y }
-      const end = this.attachPoint(targetCard, to, edge.accessIndex, scale)
+      const end = this.attachPoint(
+        targetCard,
+        to,
+        zoom < CHIP_SCALE ? -1 : edge.accessIndex,
+        scale,
+      )
 
       // Horizontal control points: the layout is left-to-right, so a curve that
       // leaves and arrives horizontally reads as a route rather than a rubber band.
@@ -550,7 +577,7 @@ export class OverlayRenderer {
 
       // The connector dot: it is what makes an edge land *on a port* rather than
       // vaguely at a box.
-      if (!dimmed && scale > CHIP_SCALE) {
+      if (!dimmed && zoom > CHIP_SCALE) {
         ctx.beginPath()
         ctx.arc(end.x, end.y, 3 * scale, 0, Math.PI * 2)
         ctx.fillStyle = colour
@@ -582,6 +609,7 @@ export class OverlayRenderer {
     ctx: CanvasRenderingContext2D,
     centres: Map<string, { x: number; y: number }>,
     scale: number,
+    zoom: number,
   ) {
     const fg = paint('fg')
     const muted = paint('muted')
@@ -599,7 +627,7 @@ export class OverlayRenderer {
       const dimmed = this.hovered !== null && this.hovered !== card.id && !this.isNeighbour(card.id)
       ctx.globalAlpha = dimmed ? 0.28 : 1
 
-      if (scale < DOT_SCALE) {
+      if (zoom < DOT_SCALE) {
         ctx.beginPath()
         ctx.arc(centre.x, centre.y, 4, 0, Math.PI * 2)
         ctx.fillStyle = accent
@@ -609,7 +637,7 @@ export class OverlayRenderer {
         continue
       }
 
-      const compact = scale < CHIP_SCALE
+      const compact = zoom < CHIP_SCALE
       const w = card.w * scale
       const h = (compact ? HEADER_H : card.h) * scale
       const x = Math.round(centre.x - w / 2)

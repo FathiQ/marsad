@@ -106,6 +106,42 @@ test('namespace filter is selectable from the rail', async ({ page }) => {
   await expect(page.getByRole('button', { name: /clear 1/ })).toBeVisible()
 })
 
+test('the graph keeps painting through a zoom gesture', async ({ page }) => {
+  // Two bugs made the cards strobe during a zoom, and both were invisible in a
+  // still screenshot. The overlay canvas was being cleared between draws because
+  // resizing it to its existing size still wipes the bitmap; and the card,
+  // chip and dot thresholds sat right where the default zoom lands, so a small
+  // scroll flipped cards in and out of existence. Sampling how much of the
+  // overlay is painted across a gesture catches either returning.
+  const painted = () =>
+    page.evaluate(() => {
+      const canvases = [...document.querySelectorAll('main canvas')] as HTMLCanvasElement[]
+      const overlay = canvases[canvases.length - 1]
+      if (!overlay) return 0
+      const ctx = overlay.getContext('2d')
+      if (!ctx) return 0
+      const { data } = ctx.getImageData(0, 0, overlay.width, overlay.height)
+      let count = 0
+      for (let i = 3; i < data.length; i += 4 * 97) if ((data[i] ?? 0) > 8) count++
+      return count
+    })
+
+  await page.waitForTimeout(1500)
+  await page.mouse.move(700, 450)
+
+  const samples: number[] = []
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.wheel(0, i % 2 === 0 ? -140 : 140)
+    await page.waitForTimeout(80)
+    samples.push(await painted())
+  }
+
+  // Nothing may go blank, and no frame may lose most of the picture.
+  const peak = Math.max(...samples)
+  expect(Math.min(...samples)).toBeGreaterThan(0)
+  expect(Math.min(...samples)).toBeGreaterThan(peak * 0.35)
+})
+
 test('reports the websocket being down rather than looking live', async ({ page }) => {
   // No websocket is served by the preview server, so the UI must degrade to
   // "offline" instead of implying the graph is still updating.
