@@ -4,12 +4,12 @@ import Sigma from 'sigma'
 import { createNodeCompoundProgram } from 'sigma/rendering'
 import { createNodeBorderProgram } from '@sigma/node-border'
 import { createNodeImageProgram } from '@sigma/node-image'
-import EdgeCurveProgram from '@sigma/edge-curve'
+import { EdgeCurvedArrowProgram } from '@sigma/edge-curve'
 
 import type { Graph as GraphData, GraphEdge, GraphNode } from '../api'
-import { iconFor } from './icons'
+import { iconFor } from '../graph/icons'
+import { FlowRenderer, type FlowEdge } from '../graph/flow'
 import {
-  cssVar,
   dimmed,
   edgeColor,
   edgeLabel,
@@ -18,14 +18,15 @@ import {
   nodeBorderColor,
   nodeColor,
   nodeSize,
+  paint,
   type NamespacePalette,
-} from './style'
-import type { LayoutRequest, LayoutResult } from './layout.worker'
+} from '../graph/style'
+import type { LayoutRequest, LayoutResult } from '../graph/layout.worker'
 
-// A node is a ring plus a pictogram: the ring carries the namespace accent — or
+// A node is a ring plus a pictogram: the ring carries the namespace colour — or
 // red when nothing protects the workload — and the pictogram says what kind of
-// thing it is. Together they let someone read the graph's shape without reading
-// a single label, which is the only way a large graph is legible at all.
+// thing it is. Together they let someone read a cluster's shape without reading
+// a single label, which is the only way a large graph is legible.
 const NodeRing = createNodeBorderProgram({
   borders: [
     { size: { value: 0.16 }, color: { attribute: 'borderColor' } },
@@ -33,8 +34,8 @@ const NodeRing = createNodeBorderProgram({
   ],
 })
 
-// keepWithinCircle would have the program paint its own disc, which in a
-// compound covers the ring and fill underneath and leaves a flat dark blob.
+// keepWithinCircle would have the program paint its own disc, covering the ring
+// and fill beneath it and leaving a flat blob.
 const NodePictogram = createNodeImageProgram({
   padding: 0.36,
   size: { mode: 'force', value: 256 },
@@ -45,10 +46,13 @@ const NodePictogram = createNodeImageProgram({
 
 const NodeProgram = createNodeCompoundProgram([NodeRing, NodePictogram])
 
+const CURVATURE = 0.22
+
 interface Props {
   data: GraphData
   palette: NamespacePalette
   theme: 'dark' | 'light'
+  animateFlow: boolean
   selectedId: string | null
   focusId: string | null
   onSelectNode: (node: GraphNode) => void
@@ -63,10 +67,11 @@ interface Props {
  * cluster with thousands of elements pannable at all — an SVG element per pod
  * stops being interactive in the low thousands.
  */
-export function GraphView({
+export function GraphCanvas({
   data,
   palette,
   theme,
+  animateFlow,
   selectedId,
   focusId,
   onSelectNode,
@@ -74,30 +79,33 @@ export function GraphView({
   onClearSelection,
 }: Props) {
   const container = useRef<HTMLDivElement>(null)
+  const overlay = useRef<HTMLCanvasElement>(null)
   const sigma = useRef<Sigma | null>(null)
+  const flow = useRef<FlowRenderer | null>(null)
   const graph = useRef<Graph>(new Graph({ multi: true, type: 'directed' }))
   const worker = useRef<Worker | null>(null)
   const nodeIndex = useRef<Map<string, GraphNode>>(new Map())
   const edgeIndex = useRef<Map<string, GraphEdge>>(new Map())
   const hovered = useRef<string | null>(null)
 
-  // Created once and reused: rebuilding the renderer would throw away the
-  // camera, which is the one piece of state the user has invested effort in.
+  // Created once and reused: rebuilding the renderer throws away the camera,
+  // which is the one piece of state the user has invested effort in.
   useEffect(() => {
-    if (!container.current) return
+    if (!container.current || !overlay.current) return
 
     const renderer = new Sigma(graph.current, container.current, {
       defaultNodeType: 'bordered-pictogram',
       nodeProgramClasses: { 'bordered-pictogram': NodeProgram },
-      // Curved edges: with several allowances between the same pair, straight
-      // lines stack into one indistinguishable stroke.
+      // Curved edges with arrowheads: direction is half the meaning of a policy
+      // graph, and several allowances between one pair need to fan out rather
+      // than stack into a single indistinguishable stroke.
       defaultEdgeType: 'curved',
-      edgeProgramClasses: { curved: EdgeCurveProgram },
+      edgeProgramClasses: { curved: EdgeCurvedArrowProgram },
       renderEdgeLabels: true,
-      labelDensity: 0.8,
-      labelGridCellSize: 64,
+      labelDensity: 0.9,
+      labelGridCellSize: 62,
       labelRenderedSizeThreshold: 6,
-      labelFont: 'ui-sans-serif, system-ui, sans-serif',
+      labelFont: "'Inter var', ui-sans-serif, system-ui, sans-serif",
       labelSize: 12,
       labelWeight: '500',
       labelColor: { attribute: 'labelColor' },
@@ -110,6 +118,11 @@ export function GraphView({
     })
     sigma.current = renderer
 
+    const flowRenderer = new FlowRenderer(overlay.current, renderer)
+    flow.current = flowRenderer
+    flowRenderer.resize()
+
+    renderer.on('afterRender', () => flowRenderer.resize())
     renderer.on('clickNode', ({ node }) => {
       const found = nodeIndex.current.get(node)
       if (found) onSelectNode(found)
@@ -120,22 +133,29 @@ export function GraphView({
     })
     renderer.on('clickStage', () => onClearSelection())
 
-    // Hover dims everything unrelated. On a dense graph this is the difference
-    // between being able to follow a node's edges and not.
+    // Hover dims everything unrelated and narrows the animation to what this
+    // node can reach. On a dense graph that is the difference between being able
+    // to follow a node's edges and not.
     renderer.on('enterNode', ({ node }) => {
       hovered.current = node
       container.current?.style.setProperty('cursor', 'pointer')
+      const related = new Set<string>()
+      graph.current.forEachEdge(node, (edgeKey) => related.add(edgeKey))
+      flowRenderer.setHighlight(related)
       renderer.refresh({ skipIndexation: true })
     })
     renderer.on('leaveNode', () => {
       hovered.current = null
       container.current?.style.setProperty('cursor', 'default')
+      flowRenderer.setHighlight(null)
       renderer.refresh({ skipIndexation: true })
     })
 
     return () => {
+      flowRenderer.stop()
       renderer.kill()
       sigma.current = null
+      flow.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -145,7 +165,6 @@ export function GraphView({
   useEffect(() => {
     const renderer = sigma.current
     if (!renderer) return
-    const light = theme === 'light'
 
     renderer.setSetting('nodeReducer', (key, attrs) => {
       const res = { ...attrs } as Record<string, unknown>
@@ -153,14 +172,14 @@ export function GraphView({
 
       if (key === selectedId) {
         res.highlighted = true
-        res.borderColor = cssVar('--accent')
+        res.borderColor = paint('accent')
         res.zIndex = 3
       }
       if (active) {
         const related = key === active || graph.current.neighbors(active).includes(key)
         if (!related) {
-          res.color = dimmed(light)
-          res.borderColor = dimmed(light)
+          res.color = dimmed()
+          res.borderColor = dimmed()
           res.pictoColor = 'rgba(0,0,0,0)'
           res.label = ''
           res.zIndex = 0
@@ -176,14 +195,14 @@ export function GraphView({
       const active = hovered.current
 
       if (key === selectedId) {
-        res.color = cssVar('--accent')
+        res.color = paint('accent')
         res.size = 4
         res.zIndex = 3
       }
       if (active) {
         const [source, target] = graph.current.extremities(key)
         if (source !== active && target !== active) {
-          res.color = dimmed(light)
+          res.color = dimmed()
           res.label = ''
           res.zIndex = 0
         } else {
@@ -215,17 +234,16 @@ export function GraphView({
         color: nodeColor(node, palette),
         borderColor: nodeBorderColor(node, palette),
         image: iconFor(node.kind, node.workloadKind),
-        pictoColor: cssVar('--picto'),
-        labelColor: cssVar('--text'),
+        pictoColor: paint('picto'),
+        labelColor: paint('fg'),
         x: at?.x ?? 0,
         y: at?.y ?? 0,
         kind: node.kind,
-        // Unprotected nodes sit above the rest, so a red ring is never buried
-        // under a neighbour.
         zIndex: isUnprotected(node) ? 1 : 0,
       })
     }
 
+    const flowEdges: FlowEdge[] = []
     for (const edge of data.edges) {
       if (!g.hasNode(edge.source) || !g.hasNode(edge.target)) continue
       g.addDirectedEdgeWithKey(edge.id, edge.source, edge.target, {
@@ -233,14 +251,20 @@ export function GraphView({
         color: edgeColor(edge),
         label: edgeLabel(edge),
         kind: edge.kind,
-        // Curvature scales with how many allowances share the pair, so parallel
-        // edges fan out instead of overlapping.
-        curvature: 0.25,
+        curvature: CURVATURE,
+      })
+      flowEdges.push({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        kind: edge.kind,
+        curvature: CURVATURE,
       })
     }
+    flow.current?.setEdges(flowEdges)
 
     worker.current?.terminate()
-    const w = new Worker(new URL('./layout.worker.ts', import.meta.url), { type: 'module' })
+    const w = new Worker(new URL('../graph/layout.worker.ts', import.meta.url), { type: 'module' })
     worker.current = w
 
     w.onmessage = (event: MessageEvent<LayoutResult>) => {
@@ -250,7 +274,7 @@ export function GraphView({
         g.setNodeAttribute(id, 'y', pos.y)
       }
       sigma.current?.refresh()
-      sigma.current?.getCamera().animatedReset({ duration: 300 })
+      sigma.current?.getCamera().animatedReset({ duration: 320 })
     }
 
     const request: LayoutRequest = {
@@ -273,8 +297,8 @@ export function GraphView({
       if (!node) return
       g.setNodeAttribute(id, 'color', nodeColor(node, palette))
       g.setNodeAttribute(id, 'borderColor', nodeBorderColor(node, palette))
-      g.setNodeAttribute(id, 'pictoColor', cssVar('--picto'))
-      g.setNodeAttribute(id, 'labelColor', cssVar('--text'))
+      g.setNodeAttribute(id, 'pictoColor', paint('picto'))
+      g.setNodeAttribute(id, 'labelColor', paint('fg'))
     })
     g.forEachEdge((id) => {
       const edge = edgeIndex.current.get(id)
@@ -283,8 +307,15 @@ export function GraphView({
     sigma.current?.refresh()
   }, [theme, palette])
 
+  useEffect(() => {
+    const f = flow.current
+    if (!f) return
+    if (animateFlow) f.start_()
+    else f.stop()
+  }, [animateFlow, data])
+
   // Search jumps the camera. The camera works in display coordinates, so the
-  // position has to come from the renderer rather than the graph.
+  // position comes from the renderer rather than the graph.
   useEffect(() => {
     const renderer = sigma.current
     if (!focusId || !renderer || !graph.current.hasNode(focusId)) return
@@ -293,5 +324,12 @@ export function GraphView({
     renderer.getCamera().animate({ x: display.x, y: display.y, ratio: 0.4 }, { duration: 420 })
   }, [focusId])
 
-  return <div className="canvas" ref={container} />
+  return (
+    <>
+      <div className="absolute inset-0" ref={container} />
+      {/* Above the WebGL canvas but transparent to input, so the animation never
+          intercepts a click meant for a node. */}
+      <canvas className="pointer-events-none absolute inset-0" ref={overlay} />
+    </>
+  )
 }

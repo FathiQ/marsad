@@ -106,9 +106,12 @@ and authz rather than inventing a second, weaker one.
   no client-go dependency — it evaluates an immutable snapshot of objects a
   caller has already fetched. That is what lets the same code back the server, a
   CLI, and a CI check.
-- **Frontend (React + TypeScript + Vite)** with a WebGL graph renderer, so
-  clusters with thousands of pods stay interactive. The default view aggregates
-  at the namespace level and drills down to workloads, then pods, on demand.
+- **Frontend (React + TypeScript + Vite)** on Tailwind and Radix primitives,
+  with a WebGL graph renderer so clusters with thousands of pods stay
+  interactive. The default view aggregates at the namespace level and drills
+  down to workloads on demand. Animated dots trace paths a rule *permits* —
+  Marsad reads declared policy and never observes traffic, and the UI is careful
+  to say which.
 
 ## Security
 

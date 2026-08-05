@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Loader2, ShieldOff, Telescope, TriangleAlert } from 'lucide-react'
 
 import {
   NotReadyError,
@@ -13,31 +14,22 @@ import {
   type Meta,
   type NamespaceSummary,
 } from './api'
-import { GraphView } from './graph/GraphView'
+import { AppHeader } from './components/AppHeader'
+import { CommandPalette } from './components/CommandPalette'
+import { FilterRail } from './components/FilterRail'
+import { GraphCanvas } from './components/GraphCanvas'
+import { Inspector } from './components/Inspector'
+import { Legend } from './components/Legend'
+import { Kbd } from './components/ui/kbd'
+import { TooltipProvider } from './components/ui/tooltip'
 import { buildNamespacePalette } from './graph/style'
-import { DetailDrawer } from './panels/DetailDrawer'
-import { Legend } from './panels/Legend'
-import { Sidebar } from './panels/Sidebar'
-
-/** An observatory dome with the shutter open. One small mark — the graph is the
- * thing worth looking at, not the branding. */
-function Mark() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M3 20.5h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M9.6 6.2a7.5 7.5 0 0 1 4.8 0l-1.1 7.1h-2.6L9.6 6.2Z"
-        fill="var(--accent)"
-        fillOpacity="0.18"
-        stroke="var(--accent)"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="3.4" r="1.7" fill="var(--accent)" />
-    </svg>
-  )
-}
+import {
+  applyFilters,
+  defaultFilters,
+  hiddenCount,
+  presentWorkloadKinds,
+  type Filters,
+} from './lib/filters'
 
 type Theme = 'dark' | 'light'
 
@@ -57,6 +49,28 @@ function applyTheme(theme: Theme) {
 const initialTheme: Theme = (localStorage.getItem('marsad.theme') as Theme | null) ?? 'dark'
 applyTheme(initialTheme)
 
+function Overlay({
+  icon: Icon,
+  title,
+  children,
+  spin,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  children?: React.ReactNode
+  spin?: boolean
+}) {
+  return (
+    <div className="absolute inset-0 z-10 grid place-items-center bg-canvas px-6 text-center">
+      <div className="max-w-md space-y-2">
+        <Icon className={`mx-auto size-7 text-faint ${spin ? 'animate-spin' : ''}`} />
+        <h2 className="text-[16px] font-semibold tracking-tight">{title}</h2>
+        <div className="text-[13px] leading-relaxed text-muted">{children}</div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [namespaces, setNamespaces] = useState<NamespaceSummary[]>([])
@@ -68,20 +82,20 @@ export default function App() {
   const [level, setLevel] = useState<Level>('namespace')
   const [selectedNs, setSelectedNs] = useState<string[]>([])
   const [includeDefault, setIncludeDefault] = useState(true)
+  const [filters, setFilters] = useState<Filters>(defaultFilters)
+  const [animateFlow, setAnimateFlow] = useState(true)
 
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   const query = useMemo(
     () => ({ level, namespaces: selectedNs, includeDefault }),
     [level, selectedNs, includeDefault],
   )
 
-  // Metadata and the namespace list, refreshed when the stream reports a new
-  // revision rather than on a timer.
   const loadSummaries = useCallback(async () => {
     try {
       const [m, ns] = await Promise.all([fetchMeta(), fetchNamespaces()])
@@ -101,15 +115,15 @@ export default function App() {
   useEffect(() => {
     void loadSummaries()
     // While the informers are still syncing there is nothing to show, so poll
-    // until there is. This only runs during the first seconds after startup.
+    // until there is. This runs only during the first seconds after startup.
     const t = window.setInterval(() => {
       if (syncing) void loadSummaries()
     }, 2000)
     return () => window.clearInterval(t)
   }, [loadSummaries, syncing])
 
-  // Initial graph over HTTP, then live updates over the socket. Fetching once
-  // means the first paint does not wait on a websocket handshake.
+  // Initial graph over HTTP so the first paint does not wait on a websocket
+  // handshake; live updates arrive on the socket afterwards.
   useEffect(() => {
     let cancelled = false
     fetchGraph(query)
@@ -124,7 +138,7 @@ export default function App() {
   }, [query])
 
   useEffect(() => {
-    const close = openStream(
+    return openStream(
       query,
       (msg) => {
         if (msg.graph) {
@@ -135,18 +149,16 @@ export default function App() {
       },
       setConnected,
     )
-    return close
   }, [query, loadSummaries])
 
-  // Keyboard: / focuses search, Escape closes the drawer.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing =
-        e.target instanceof HTMLElement &&
-        ['INPUT', 'TEXTAREA'].includes(e.target.tagName)
-      if (e.key === '/' && !typing) {
+        e.target instanceof HTMLElement && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)
+
+      if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === '/' && !typing)) {
         e.preventDefault()
-        searchRef.current?.focus()
+        setPaletteOpen(true)
       }
       if (e.key === 'Escape' && !typing) {
         setSelectedNode(null)
@@ -157,22 +169,22 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Built from the full namespace list rather than from the nodes on screen, so
-  // filtering the graph does not repaint everything a different colour.
   const palette = useMemo(
     () => buildNamespacePalette(namespaces.map((ns) => ns.name)),
     [namespaces],
   )
 
+  const filtered = useMemo(() => (graph ? applyFilters(graph, filters) : null), [graph, filters])
+  const hidden = graph && filtered ? hiddenCount(graph, filtered) : 0
+  const workloadKinds = useMemo(() => presentWorkloadKinds(graph), [graph])
+
   const nodesById = useMemo(
-    () => new Map((graph?.nodes ?? []).map((n) => [n.id, n])),
-    [graph],
+    () => new Map((filtered?.nodes ?? []).map((n) => [n.id, n])),
+    [filtered],
   )
 
   const toggleNamespace = useCallback((name: string) => {
-    setSelectedNs((cur) =>
-      cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name],
-    )
+    setSelectedNs((cur) => (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]))
   }, [])
 
   const focusNode = useCallback((node: GraphNode) => {
@@ -181,163 +193,141 @@ export default function App() {
     setSelectedEdge(null)
   }, [])
 
-  const unavailable = meta?.capabilities.policies.filter((p) => !p.available) ?? []
   const totalUnprotected = namespaces.reduce((sum, ns) => sum + ns.unprotected, 0)
+  const empty = !syncing && !error && filtered && filtered.nodes.length === 0
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brand">
-          <Mark />
-          <span className="name">Marsad</span>
-          <span className="tag">the observatory for your Kubernetes network policies</span>
-        </div>
-
-        <div className="spacer" />
-
-        {meta && (
-          <div className="stats">
-            <span className="stat">
-              <b>{meta.counts.namespaces}</b> namespaces
-            </span>
-            <span className="stat">
-              <b>{meta.counts.workloads}</b> workloads
-            </span>
-            <span className="stat">
-              <b>{meta.counts.policies}</b> policies
-            </span>
-            {totalUnprotected > 0 && (
-              <span className="stat alert" title="Workloads no policy selects at all">
-                <b>{totalUnprotected}</b> unprotected
-              </span>
-            )}
-          </div>
-        )}
-
-        {unavailable.map((c) => (
-          <span className="pill off muted" key={c.provider} title={c.reason}>
-            <span className="dot" />
-            {c.provider === 'aws-anp' ? 'domain policies unavailable' : `${c.provider} unavailable`}
-          </span>
-        ))}
-
-        <span className={`pill ${connected ? '' : 'off'}`} title={connected ? 'Live' : 'Reconnecting…'}>
-          <span className="dot" />
-          {connected ? 'live' : 'offline'}
-        </span>
-
-        <button
-          className="icon-btn"
-          onClick={() => {
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
+        <AppHeader
+          meta={meta}
+          connected={connected}
+          unprotected={totalUnprotected}
+          theme={theme}
+          onToggleTheme={() => {
             const next = theme === 'dark' ? 'light' : 'dark'
             applyTheme(next)
             setTheme(next)
           }}
-          aria-label="Toggle theme"
-        >
-          {theme === 'dark' ? '☾' : '☀'}
-        </button>
-      </header>
-
-      <div className="body">
-        <Sidebar
-          namespaces={namespaces}
-          selected={selectedNs}
-          onToggle={toggleNamespace}
-          onClear={() => setSelectedNs([])}
-          level={level}
-          onLevel={setLevel}
-          includeDefault={includeDefault}
-          onIncludeDefault={setIncludeDefault}
-          nodes={graph?.nodes ?? []}
-          onFocusNode={focusNode}
-          searchRef={searchRef}
-          palette={palette}
+          onOpenSearch={() => setPaletteOpen(true)}
         />
 
-        <div className="canvas-wrap">
-          {graph && (
-            <GraphView
-              data={graph}
-              palette={palette}
-              theme={theme}
-              selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
-              focusId={focusId}
-              onSelectNode={(n) => {
-                setSelectedNode(n)
-                setSelectedEdge(null)
-              }}
-              onSelectEdge={(e) => {
-                setSelectedEdge(e)
-                setSelectedNode(null)
-              }}
-              onClearSelection={() => {
+        <div className="flex min-h-0 flex-1">
+          <FilterRail
+            namespaces={namespaces}
+            selectedNamespaces={selectedNs}
+            onToggleNamespace={toggleNamespace}
+            onClearNamespaces={() => setSelectedNs([])}
+            level={level}
+            onLevel={setLevel}
+            includeDefault={includeDefault}
+            onIncludeDefault={setIncludeDefault}
+            animateFlow={animateFlow}
+            onAnimateFlow={setAnimateFlow}
+            filters={filters}
+            onFilters={setFilters}
+            workloadKinds={workloadKinds}
+            palette={palette}
+            hidden={hidden}
+            onReset={() => {
+              setFilters(defaultFilters())
+              setIncludeDefault(true)
+            }}
+          />
+
+          <main className="relative min-w-0 flex-1 overflow-hidden bg-canvas">
+            <div className="canvas-texture pointer-events-none absolute inset-0 opacity-50" />
+            <div className="canvas-vignette pointer-events-none absolute inset-0" />
+
+            {filtered && (
+              <GraphCanvas
+                data={filtered}
+                palette={palette}
+                theme={theme}
+                animateFlow={animateFlow}
+                selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
+                focusId={focusId}
+                onSelectNode={(n) => {
+                  setSelectedNode(n)
+                  setSelectedEdge(null)
+                }}
+                onSelectEdge={(e) => {
+                  setSelectedEdge(e)
+                  setSelectedNode(null)
+                }}
+                onClearSelection={() => {
+                  setSelectedNode(null)
+                  setSelectedEdge(null)
+                }}
+              />
+            )}
+
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between p-3.5">
+              <div className="pointer-events-auto">
+                <Legend />
+              </div>
+              {/* Given a backdrop: the canvas extends underneath, and bare text
+                  over a node label is unreadable for both. */}
+              <p className="glass rim hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] text-faint md:flex">
+                <Kbd>⌘K</Kbd> search
+                <span className="opacity-40">·</span>
+                <Kbd>esc</Kbd> close
+                <span className="opacity-40">·</span>
+                click an edge for the rule behind it
+              </p>
+            </div>
+
+            {graph?.truncated && (
+              <div className="glass rim pointer-events-none absolute top-3.5 left-1/2 z-10 -translate-x-1/2 rounded-full border border-warn/40 px-3.5 py-1.5 text-[12px] text-muted">
+                Some peers matched more workloads than can be drawn and were collapsed to their
+                namespace.
+              </div>
+            )}
+
+            {syncing && !graph && (
+              <Overlay icon={Loader2} title="Syncing cluster state" spin>
+                Reading namespaces, workloads and policies. This takes a moment on first start.
+              </Overlay>
+            )}
+
+            {error && (
+              <Overlay icon={TriangleAlert} title="Could not reach the API">
+                <p>{error}</p>
+                <p className="mt-2 text-faint">Marsad is read-only, so this is safe to retry.</p>
+              </Overlay>
+            )}
+
+            {empty && (
+              <Overlay icon={hidden > 0 ? ShieldOff : Telescope} title="Nothing to draw">
+                {hidden > 0
+                  ? 'Every node is hidden by the current filters.'
+                  : selectedNs.length > 0
+                    ? 'No workloads in the selected namespaces.'
+                    : 'This cluster has no workloads Marsad can see.'}
+              </Overlay>
+            )}
+
+            <Inspector
+              node={selectedNode}
+              edge={selectedEdge}
+              nodesById={nodesById}
+              onClose={() => {
                 setSelectedNode(null)
                 setSelectedEdge(null)
               }}
             />
-          )}
-
-          {graph && graph.nodes.length > 0 && <Legend level={level} />}
-          {graph && graph.nodes.length > 0 && (
-            <div className="hint">
-              <kbd>/</kbd> search · <kbd>esc</kbd> close · click an edge for the rule behind it
-            </div>
-          )}
-
-          {graph?.truncated && (
-            <div className="banner glass">
-              Some peers matched more workloads than can be drawn individually and were collapsed to
-              their namespace.
-            </div>
-          )}
-
-          {syncing && !graph && (
-            <div className="overlay">
-              <div className="inner">
-                <div className="spinner" />
-                <h2>Syncing cluster state</h2>
-                <p>Reading namespaces, workloads and policies. This takes a moment on first start.</p>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="overlay">
-              <div className="inner">
-                <h2>Could not reach the API</h2>
-                <p>{error}</p>
-                <p style={{ color: 'var(--text-faint)', fontSize: 13, marginTop: 10 }}>
-                  Marsad is read-only, so this is safe to retry.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {!syncing && !error && graph && graph.nodes.length === 0 && (
-            <div className="overlay">
-              <div className="inner">
-                <h2>Nothing to draw</h2>
-                <p>
-                  {selectedNs.length > 0
-                    ? 'No workloads in the selected namespaces.'
-                    : 'This cluster has no workloads Marsad can see.'}
-                </p>
-              </div>
-            </div>
-          )}
-
-          <DetailDrawer
-            node={selectedNode}
-            edge={selectedEdge}
-            nodesById={nodesById}
-            onClose={() => {
-              setSelectedNode(null)
-              setSelectedEdge(null)
-            }}
-          />
+          </main>
         </div>
+
+        <CommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          nodes={filtered?.nodes ?? []}
+          namespaces={namespaces}
+          onSelectNode={focusNode}
+          onSelectNamespace={toggleNamespace}
+        />
       </div>
-    </div>
+    </TooltipProvider>
   )
 }

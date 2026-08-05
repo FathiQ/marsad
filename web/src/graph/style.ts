@@ -1,9 +1,52 @@
 import type { GraphEdge, GraphNode } from '../api'
 
-/** Reads a CSS custom property, so the palette lives in one place and the theme
- * toggle repaints the canvas along with the chrome. */
-export function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
+/**
+ * The canvas palette, mirroring the CSS tokens in hex.
+ *
+ * This duplication is deliberate and unavoidable. Sigma's WebGL colour parser
+ * understands hex and rgb() only — it does not understand oklch(), and it falls
+ * back to black *silently* rather than erroring, which reads as a design choice
+ * rather than a bug. Reading the CSS variables would therefore paint every node
+ * and edge black. The chrome keeps its oklch tokens, where Tailwind and the
+ * browser handle them properly, and the canvas gets converted values here.
+ *
+ * Kept adjacent to `:root` in styles.css: if one moves, move the other.
+ */
+const CANVAS_PALETTE = {
+  dark: {
+    fg: oklch(0.96, 0.006, 265),
+    muted: oklch(0.72, 0.02, 265),
+    canvas: oklch(0.174, 0.016, 265),
+    accent: oklch(0.68, 0.17, 255),
+    allowed: oklch(0.76, 0.17, 155),
+    neutralEdge: oklch(0.6, 0.025, 265),
+    approx: oklch(0.79, 0.15, 78),
+    danger: oklch(0.68, 0.19, 22),
+    domain: oklch(0.72, 0.17, 305),
+    cidr: oklch(0.75, 0.16, 55),
+    world: oklch(0.68, 0.19, 22),
+    picto: oklch(0.18, 0.015, 265),
+  },
+  light: {
+    fg: oklch(0.22, 0.02, 265),
+    muted: oklch(0.47, 0.02, 265),
+    canvas: oklch(0.995, 0.001, 265),
+    accent: oklch(0.55, 0.2, 258),
+    allowed: oklch(0.58, 0.15, 155),
+    neutralEdge: oklch(0.7, 0.015, 265),
+    approx: oklch(0.62, 0.14, 65),
+    danger: oklch(0.56, 0.2, 25),
+    domain: oklch(0.55, 0.19, 300),
+    cidr: oklch(0.62, 0.16, 50),
+    world: oklch(0.56, 0.2, 25),
+    picto: oklch(0.99, 0, 0),
+  },
+} as const
+
+export type CanvasColour = keyof typeof CANVAS_PALETTE.dark
+
+export function paint(name: CanvasColour): string {
+  return CANVAS_PALETTE[isLight() ? 'light' : 'dark'][name]
 }
 
 /* ------------------------------------------------------------------ colour */
@@ -15,14 +58,14 @@ export function cssVar(name: string): string {
  * namespaces collide by chance and become indistinguishable, which is exactly
  * what happened to prod and edge here — at twelve buckets and again at
  * twenty-four. Hashing optimises for a colour that is stable across clusters,
- * but what a viewer actually needs is that the namespaces on their screen differ
- * from each other.
+ * but what a viewer needs is that the namespaces on their screen differ from
+ * each other.
  *
  * Assigning by position guarantees that neighbours in the list never share a
  * hue. The cost is that adding a namespace can shift the colours after it; for
  * a set that changes rarely, that is a good trade.
  */
-const HUES = [205, 152, 275, 32, 340, 188, 96, 250, 14, 168, 300, 60]
+const HUES = [255, 155, 305, 45, 350, 195, 125, 275, 25, 175, 325, 85]
 
 export type NamespacePalette = Map<string, number>
 
@@ -31,61 +74,55 @@ export function buildNamespacePalette(names: string[]): NamespacePalette {
   return new Map(sorted.map((name, i) => [name, HUES[i % HUES.length]!]))
 }
 
-/** Falls back to a neutral hue for a namespace the palette has not seen, which
- * happens briefly while a new namespace is still propagating. */
+/** Falls back to a neutral hue for a namespace the palette has not seen yet. */
 export function hueFor(palette: NamespacePalette, name: string): number {
-  return palette.get(name) ?? 210
+  return palette.get(name) ?? 255
 }
 
-/** The swatch colour, shared by the sidebar so filter and canvas agree. */
-export function namespaceSwatch(palette: NamespacePalette, name: string): string {
-  return hsl(hueFor(palette, name), 58, isLight() ? 47 : 60)
-}
-
-/** True when the document is in the light theme. */
 function isLight(): boolean {
   return document.documentElement.dataset.theme === 'light'
 }
 
 /**
- * HSL to hex.
+ * OKLCH to hex.
  *
- * Sigma's WebGL colour parser understands hex and rgb() but not hsl(), and it
- * fails silently to black rather than erroring — which is exactly the kind of
- * bug that reads as a design choice. Hues are far easier to reason about for a
- * generated palette, so they are authored in HSL and converted here.
+ * The palette is authored in OKLCH because it keeps perceived lightness even
+ * across hues — the reason twelve namespace colours can sit side by side without
+ * one shouting. Sigma's WebGL colour parser only understands hex and rgb(), and
+ * fails silently to black rather than erroring, so the conversion happens here
+ * rather than being left to the browser.
  */
-function hsl(h: number, s: number, l: number): string {
-  const sat = s / 100
-  const lig = l / 100
-  const chroma = (1 - Math.abs(2 * lig - 1)) * sat
-  const hp = (((h % 360) + 360) % 360) / 60
-  const x = chroma * (1 - Math.abs((hp % 2) - 1))
-  const [r1, g1, b1] =
-    hp < 1
-      ? [chroma, x, 0]
-      : hp < 2
-        ? [x, chroma, 0]
-        : hp < 3
-          ? [0, chroma, x]
-          : hp < 4
-            ? [0, x, chroma]
-            : hp < 5
-              ? [x, 0, chroma]
-              : [chroma, 0, x]
-  const m = lig - chroma / 2
+export function oklch(l: number, c: number, h: number): string {
+  const hr = (h * Math.PI) / 180
+  const a = c * Math.cos(hr)
+  const b = c * Math.sin(hr)
+
+  const l_ = l + 0.3963377774 * a + 0.2158037573 * b
+  const m_ = l - 0.1055613458 * a - 0.0638541728 * b
+  const s_ = l - 0.0894841775 * a - 1.291485548 * b
+
+  const L = l_ * l_ * l_
+  const M = m_ * m_ * m_
+  const S = s_ * s_ * s_
+
+  const lr = 4.0767416621 * L - 3.3077115913 * M + 0.2309699292 * S
+  const lg = -1.2684380046 * L + 2.6097574011 * M - 0.3413193965 * S
+  const lb = -0.0041960863 * L - 0.7034186147 * M + 1.707614701 * S
+
+  const gamma = (v: number) =>
+    v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(v, 0), 1 / 2.4) - 0.055
   const channel = (v: number) =>
-    Math.round((v + m) * 255)
+    Math.round(Math.min(1, Math.max(0, gamma(v))) * 255)
       .toString(16)
       .padStart(2, '0')
-  return `#${channel(r1!)}${channel(g1!)}${channel(b1!)}`
+
+  return `#${channel(lr)}${channel(lg)}${channel(lb)}`
 }
 
 /**
  * Node fill. Cluster nodes take their namespace's hue so that everything
- * belonging together reads as belonging together, which is the single most
- * useful thing colour can do on this graph. External peers keep fixed,
- * deliberately non-namespace colours.
+ * belonging together reads as belonging together — the single most useful thing
+ * colour can do on this graph. External peers keep fixed, non-namespace colours.
  */
 export function nodeColor(node: GraphNode, palette: NamespacePalette): string {
   const light = isLight()
@@ -94,40 +131,36 @@ export function nodeColor(node: GraphNode, palette: NamespacePalette): string {
     case 'workload': {
       const hue = hueFor(palette, node.namespace ?? node.label)
       return node.kind === 'namespace'
-        ? hsl(hue, light ? 64 : 62, light ? 47 : 58)
-        : hsl(hue, light ? 54 : 50, light ? 57 : 66)
+        ? oklch(light ? 0.62 : 0.7, 0.15, hue)
+        : oklch(light ? 0.68 : 0.76, 0.12, hue)
     }
     case 'world':
     case 'any':
-      return cssVar('--node-world')
+      return paint('world')
     case 'domain':
-      return cssVar('--node-domain')
+      return paint('domain')
     case 'cidr':
-      return cssVar('--node-cidr')
+      return paint('cidr')
     default:
-      return cssVar('--text-dim')
+      return paint('muted')
   }
 }
 
 /**
- * The ring around a node.
- *
- * Red means no policy selects the workload at all — the one thing a viewer
- * should be able to spot without reading a single label. Otherwise the ring is
- * a darker shade of the fill, which gives the node an edge against the
- * background instead of leaving it a flat disc.
+ * The ring around a node. Red means no policy selects the workload at all — the
+ * one thing a viewer should spot without reading a single label.
  */
 export function nodeBorderColor(node: GraphNode, palette: NamespacePalette): string {
-  if (isUnprotected(node)) return cssVar('--danger')
+  if (isUnprotected(node)) return paint('danger')
   if (node.kind === 'namespace' || node.kind === 'workload') {
     const hue = hueFor(palette, node.namespace ?? node.label)
-    return hsl(hue, isLight() ? 60 : 55, isLight() ? 33 : 28)
+    return oklch(isLight() ? 0.5 : 0.42, 0.12, hue)
   }
-  return cssVar('--bg')
+  return paint('canvas')
 }
 
 /** Size carries meaning: a namespace grows with what it holds, so the busiest
- * parts of the cluster are the ones that draw the eye. */
+ * parts of the cluster draw the eye. */
 export function nodeSize(node: GraphNode): number {
   switch (node.kind) {
     case 'namespace':
@@ -147,19 +180,19 @@ export function nodeSize(node: GraphNode): number {
 export function edgeColor(edge: GraphEdge): string {
   switch (edge.kind) {
     case 'allowed':
-      return cssVar('--allowed')
+      return paint('allowed')
     case 'approximate':
-      return cssVar('--approx')
+      return paint('approx')
     default:
-      return cssVar('--default')
+      return paint('neutralEdge')
   }
 }
 
 export function edgeSize(edge: GraphEdge): number {
-  // Traffic permitted only by the absence of policy is drawn thin. It is the
+  // Traffic permitted only by the absence of policy is drawn thin: it is the
   // lack of a decision and should not compete with a rule somebody wrote.
   if (edge.kind === 'default') return 1
-  return edge.dns ? 1.6 : 2.6
+  return edge.dns ? 1.8 : 3
 }
 
 /** Edge label: ports, or nothing when the rule places no restriction. */
@@ -180,8 +213,7 @@ export function isUnprotected(node: GraphNode): boolean {
   return false
 }
 
-/** Dimmed variant used when hover isolates a neighbourhood. Keeping a trace of
- * the original colour reads better than flattening everything to grey. */
-export function dimmed(light: boolean): string {
-  return light ? 'rgba(140,150,165,0.16)' : 'rgba(110,120,140,0.14)'
+/** Dimmed variant used when hover isolates a neighbourhood. */
+export function dimmed(): string {
+  return isLight() ? 'rgba(120,132,150,0.18)' : 'rgba(110,124,150,0.13)'
 }

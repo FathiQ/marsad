@@ -10,63 +10,61 @@ test.beforeEach(async ({ page }) => {
 test('renders the shell and the cluster summary', async ({ page }) => {
   await expect(page).toHaveTitle('Marsad')
 
-  // The header counts are the first thing proving data reached the UI. Scoped
-  // to the header, since "workloads" also appears in the sidebar.
-  const header = page.locator('.header')
-  await expect(header.locator('.stat', { hasText: 'workloads' })).toBeVisible()
-  await expect(header.locator('.stat.alert')).toContainText('unprotected')
+  const header = page.getByRole('banner')
+  await expect(header.getByText('workloads')).toBeVisible()
+  await expect(header.getByText('unprotected')).toBeVisible()
 })
 
 test('says so when a policy provider is unavailable', async ({ page }) => {
   // Silently omitting domain policies would be worse than a graph that admits
   // it cannot see them.
-  await expect(page.getByText('domain policies unavailable')).toBeVisible()
+  await expect(page.getByText('domain policies off')).toBeVisible()
 })
 
 test('draws the graph on a canvas', async ({ page }) => {
   // Sigma renders to WebGL canvases; their presence is the signal that layout
   // ran and the renderer mounted rather than white-screening.
-  await expect(page.locator('.canvas canvas').first()).toBeVisible()
-  await expect(page.locator('.canvas canvas')).not.toHaveCount(0)
+  await expect(page.locator('main canvas').first()).toBeVisible()
 })
 
-test('lists namespaces with their unprotected counts', async ({ page }) => {
-  await expect(page.getByRole('button', { name: /prod/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /edge/ })).toBeVisible()
+test('the flow overlay sits above the graph without stealing clicks', async ({ page }) => {
+  // The animation must never intercept a click meant for a node.
+  await expect(page.locator('main canvas.pointer-events-none')).toHaveCount(1)
 })
 
-test('search focuses with / and finds a workload', async ({ page }) => {
+test('command palette opens with / and finds a workload', async ({ page }) => {
   await page.locator('body').press('/')
-  const search = page.getByLabel('Search namespaces and workloads')
-  await expect(search).toBeFocused()
+  await expect(page.getByRole('dialog', { name: 'Search the cluster' })).toBeVisible()
 
-  await search.fill('api')
-  await expect(page.getByText('Jump to')).toBeVisible()
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await expect(page.getByRole('option', { name: /api/ }).first()).toBeVisible()
 })
 
-test('opens the detail drawer and shows the applied policy YAML', async ({ page }) => {
-  await page.locator('body').press('/')
-  const search = page.getByLabel('Search namespaces and workloads')
-  await search.fill('api')
-  await page.getByRole('button', { name: /^api/ }).first().click()
-
-  const drawer = page.getByRole('dialog', { name: 'Details' })
-  await expect(drawer).toBeVisible()
-  await expect(drawer.locator('.badge', { hasText: 'ingress isolated' })).toBeVisible()
-
-  // Traceability: the policy is listed, and its original YAML is available
-  // read-only. This is the feature the whole tool exists for.
-  //
-  // Exact match matters here: the policy name also appears inside the rule
-  // identifier on the effective-rules list, which is itself the point.
-  await drawer.getByText('api-ingress', { exact: true }).click()
-  await expect(drawer.locator('pre.yaml')).toContainText('podSelector')
+test('command palette opens with the meta shortcut too', async ({ page }) => {
+  await page.locator('body').press('ControlOrMeta+k')
+  await expect(page.getByRole('dialog', { name: 'Search the cluster' })).toBeVisible()
 })
 
-test('escape closes the drawer', async ({ page }) => {
+test('selecting from the palette opens the inspector with the policy YAML', async ({ page }) => {
   await page.locator('body').press('/')
-  await page.getByLabel('Search namespaces and workloads').fill('api')
-  await page.getByRole('button', { name: /^api/ }).first().click()
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector).toBeVisible()
+  await expect(inspector.getByText('ingress isolated')).toBeVisible()
+
+  // Traceability: the policy is listed and its original YAML is available
+  // read-only. Exact match, because the policy name also appears inside the
+  // rule identifier on the effective-rules list — which is itself the point.
+  await inspector.getByText('api-ingress', { exact: true }).click()
+  await expect(inspector.locator('pre')).toContainText('podSelector')
+})
+
+test('escape closes the inspector', async ({ page }) => {
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
   await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible()
 
   await page.locator('body').press('Escape')
@@ -81,8 +79,31 @@ test('toggles between dark and light', async ({ page }) => {
 })
 
 test('switches aggregation level', async ({ page }) => {
-  await page.getByRole('button', { name: 'Workload', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Workload', exact: true })).toHaveClass(/on/)
+  const workload = page.getByRole('radio', { name: 'Workload' })
+  await workload.click()
+  await expect(workload).toHaveAttribute('data-state', 'on')
+})
+
+test('filters hide elements and say how many', async ({ page }) => {
+  // Hiding without saying so leaves someone wondering where their workloads
+  // went, so the count and a reset are part of the contract.
+  await page.getByText('Only unprotected').click()
+  await expect(page.getByText(/\d+ hidden/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'reset' }).click()
+  await expect(page.getByText(/\d+ hidden/)).toBeHidden()
+})
+
+test('the legend explains that motion means permitted, not observed', async ({ page }) => {
+  // Marsad reads declared policy. Animated edges must not be mistaken for
+  // observed traffic, so the legend says which it is.
+  await page.getByRole('button', { name: 'Legend' }).click()
+  await expect(page.getByText(/never observes traffic/)).toBeVisible()
+})
+
+test('namespace filter is selectable from the rail', async ({ page }) => {
+  await page.getByRole('button', { name: /prod/ }).first().click()
+  await expect(page.getByRole('button', { name: /clear 1/ })).toBeVisible()
 })
 
 test('reports the websocket being down rather than looking live', async ({ page }) => {
