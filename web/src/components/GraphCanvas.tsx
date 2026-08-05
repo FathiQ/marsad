@@ -37,14 +37,18 @@ const NodeRing = createNodeBorderProgram({
 })
 
 // Icons are drawn as tinted masks so the disc keeps its namespace colour and
-// the ring keeps its warning. keepWithinCircle stays off: it would have the
-// program paint its own disc over both.
+// the ring keeps its warning.
+//
+// keepWithinCircle must be on. With it off the icon is laid out in a square that
+// overruns the disc, and the corners that escape read as notches around the rim
+// — every node ends up looking like a cog. Clipping to the circle and giving the
+// glyph generous padding keeps it sitting properly inside the ring.
 const NodePictogram = createNodeImageProgram({
-  padding: 0.38,
+  padding: 0.22,
   size: { mode: 'force', value: 256 },
   drawingMode: 'color',
   colorAttribute: 'pictoColor',
-  keepWithinCircle: false,
+  keepWithinCircle: true,
 })
 
 const NodeProgram = createNodeCompoundProgram([NodeRing, NodePictogram])
