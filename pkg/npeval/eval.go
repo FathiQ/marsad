@@ -145,7 +145,7 @@ type ResolvedPeer struct {
 func (p ResolvedPeer) key() string {
 	switch p.Kind {
 	case PeerAny:
-		return "any"
+		return displayAny
 	case PeerCIDR:
 		var b strings.Builder
 		b.WriteString("cidr:")
@@ -285,7 +285,7 @@ func (e *Evaluator) EffectiveAll(namespaces ...string) []Effective {
 // ruleAllows expands one rule into allow entries.
 func (e *Evaluator) ruleAllows(p Policy, rule Rule, dir Direction, subject Workload) []Allow {
 	if rule.AllPeers {
-		peer := ResolvedPeer{Kind: PeerAny, Display: "any"}
+		peer := ResolvedPeer{Kind: PeerAny, Display: displayAny}
 		return []Allow{{
 			Peer:  peer,
 			Ports: e.rulePorts(rule, dir, subject, peer),
@@ -362,7 +362,7 @@ func (e *Evaluator) resolvePeer(p Policy, peer Peer) ResolvedPeer {
 			Display:    podsDisplay(peer, p.Ref.Namespace, namespaces),
 		}
 	default:
-		return ResolvedPeer{Kind: PeerAny, Display: "any"}
+		return ResolvedPeer{Kind: PeerAny, Display: displayAny}
 	}
 }
 

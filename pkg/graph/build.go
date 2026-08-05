@@ -149,7 +149,7 @@ func (b *builder) addDirection(w npeval.Workload, selfID string, dir npeval.Dire
 		// Nothing governs this direction, so everything is permitted. Drawn as a
 		// dashed edge to the "any" node: the absence of a policy, not a rule.
 		anyID := b.node(peerNodeID(NodeAny, "all"), func() Node {
-			return Node{Kind: NodeAny, Label: "any"}
+			return Node{Kind: NodeAny, Label: string(NodeAny)}
 		}).ID
 		b.link(anyID, selfID, dir, EdgeDefault, nil, nil, "no policy isolates this workload")
 		return
@@ -214,7 +214,7 @@ func (b *builder) peerNodes(p npeval.ResolvedPeer) []string {
 	switch p.Kind {
 	case npeval.PeerAny:
 		return []string{b.node(peerNodeID(NodeAny, "all"), func() Node {
-			return Node{Kind: NodeAny, Label: "any"}
+			return Node{Kind: NodeAny, Label: string(NodeAny)}
 		}).ID}
 
 	case npeval.PeerCIDR:

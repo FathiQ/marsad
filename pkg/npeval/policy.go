@@ -112,10 +112,15 @@ const (
 	PeerDomain
 )
 
+// displayAny is the label for a peer that matches everything. It appears in
+// PeerKind.String, in resolved peers, and in the graph node the UI draws for it,
+// so the three cannot drift apart.
+const displayAny = "any"
+
 func (k PeerKind) String() string {
 	switch k {
 	case PeerAny:
-		return "any"
+		return displayAny
 	case PeerPods:
 		return "pods"
 	case PeerCIDR:

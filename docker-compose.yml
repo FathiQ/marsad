@@ -7,7 +7,7 @@ services:
   # Go toolchain: build, test, lint. Plain upstream image, so the test loop never
   # waits on a rebuild.
   go:
-    image: golang:1.24-bookworm
+    image: golang:1.25-bookworm
     working_dir: /src
     volumes:
       - .:/src
@@ -82,7 +82,7 @@ services:
       - "8080:8080"
 
   lint:
-    image: golangci/golangci-lint:v2.1.6
+    image: golangci/golangci-lint:v2.12.2
     working_dir: /src
     volumes:
       - .:/src

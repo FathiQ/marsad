@@ -8,7 +8,7 @@
 # runs, so it has to exist inside the container — mounting ~/.aws alone is not
 # enough. Nothing else is added: Marsad talks to the API server directly and
 # never shells out to kubectl.
-FROM golang:1.24-bookworm
+FROM golang:1.25-bookworm
 
 ARG AWSCLI_VERSION=2.27.25
 

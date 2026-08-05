@@ -7,13 +7,33 @@ tooling installed on your machine — only Docker.
 make test     # run the Go test suite
 make cover    # tests + coverage summary
 make lint     # golangci-lint
+make vuln     # govulncheck
 make fmt      # gofmt the tree
 make tidy     # go mod tidy
 make sh       # drop into a shell with the Go toolchain
 make help     # list all targets
 ```
 
-The first run pulls `golang:1.24-bookworm` and downloads modules into a named
+## Vulnerability scanning
+
+Run `make vuln`. CI runs the same check and fails on a regression.
+
+Registry scanners cannot help here. ECR basic scanning is Clair-based: it reads
+OS package metadata, and a distroless image has no package manager to provide
+any, so it reports `UnsupportedImageError`. That is the expected result, not a
+misconfiguration — but it means the registry gives you no coverage at all while
+appearing to have scanned the image.
+
+`govulncheck` is the right tool for a Go binary. It works on the module graph and
+reports only vulnerabilities reachable from this code, which keeps the signal
+high: the first run found three reachable issues in a transitive `golang.org/x/net`
+that no image scanner would have surfaced.
+
+If you want registry-side scanning as well, ECR *enhanced* scanning (Amazon
+Inspector) does understand Go binaries, unlike basic scanning. It is a
+registry-level setting and it is billed per image.
+
+The first run pulls `golang:1.25-bookworm` and downloads modules into a named
 volume, so it takes a minute. Every run after that is fast — the module and
 build caches persist in Docker volumes across invocations.
 

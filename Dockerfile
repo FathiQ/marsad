@@ -7,7 +7,7 @@
 # lets Go cross-compile to the target. Building an amd64 image on an arm64 Mac
 # therefore costs nothing; emulating an amd64 toolchain under QEMU would be
 # minutes slower for an identical result.
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
 WORKDIR /src
 
 # Dependencies in their own layer: they change far less often than the code.
