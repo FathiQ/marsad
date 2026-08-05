@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Loader2, ShieldOff, Telescope, TriangleAlert } from 'lucide-react'
+import { ShieldOff, Telescope, TriangleAlert } from 'lucide-react'
 
 import {
   NotReadyError,
@@ -20,6 +20,7 @@ import { FilterRail } from './components/FilterRail'
 import { GraphCanvas } from './components/GraphCanvas'
 import { Inspector } from './components/Inspector'
 import { Legend } from './components/Legend'
+import { Splash } from './components/Splash'
 import { SimulatePanel, type Prefill } from './components/SimulatePanel'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -229,6 +230,17 @@ export default function App() {
   const totalUnprotected = namespaces.reduce((sum, ns) => sum + ns.unprotected, 0)
   const empty = !syncing && !error && filtered && filtered.nodes.length === 0
 
+  // Held over the whole shell rather than over the canvas, so it continues the
+  // boot screen instead of framing a half-drawn dashboard behind it.
+  if (syncing && !graph && !error) {
+    return (
+      <Splash
+        status="Syncing cluster state"
+        detail="Reading namespaces, workloads and policies. This takes a moment on first start."
+      />
+    )
+  }
+
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
@@ -321,11 +333,6 @@ export default function App() {
               </div>
             )}
 
-            {syncing && !graph && (
-              <Overlay icon={Loader2} title="Syncing cluster state" spin>
-                Reading namespaces, workloads and policies. This takes a moment on first start.
-              </Overlay>
-            )}
 
             {error && (
               <Overlay icon={TriangleAlert} title="Could not reach the API">

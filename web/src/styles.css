@@ -187,3 +187,17 @@
 .animate-pulse-dot {
   animation: marsad-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* The boot screen's progress bar. Defined here and mirrored in index.html,
+   which has to run before this stylesheet exists. */
+@keyframes marsad-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(410%);
+  }
+}
+.splash-sweep {
+  animation: marsad-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
