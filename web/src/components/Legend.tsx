@@ -1,11 +1,11 @@
 import { Info } from 'lucide-react'
 
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Button } from './ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 
-/** The graph uses colour and shape to mean things; saying which is cheaper than
- * making people infer it. Tucked into a popover so it explains on demand rather
- * than permanently occupying a corner of the canvas. */
+/** The graph uses colour, shape and motion to mean things; saying which is
+ * cheaper than making people infer it. Kept in a popover so it explains on
+ * demand rather than permanently occupying a corner of the canvas. */
 export function Legend() {
   return (
     <Popover>
@@ -15,21 +15,23 @@ export function Legend() {
           Legend
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3.5">
+      <PopoverContent align="end" className="w-[21rem] p-3.5">
         <div className="space-y-3.5">
-          <div className="space-y-1.5">
+          <section className="space-y-1.5">
             <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
               Connections
             </h4>
-            {[
-              ['var(--allowed)', 3, 'allowed by a rule'],
-              ['var(--neutral-edge)', 1, 'allowed by default — nothing isolates it'],
-              ['var(--approx)', 3, 'depends on DNS at runtime'],
-            ].map(([colour, weight, label]) => (
-              <div key={label as string} className="flex items-center gap-2.5 text-[11.5px] text-muted">
+            {(
+              [
+                ['var(--allowed)', 3, 'allowed by a rule'],
+                ['var(--neutral-edge)', 1, 'allowed by default — nothing isolates it'],
+                ['var(--approx)', 3, 'depends on DNS at runtime'],
+              ] as const
+            ).map(([colour, weight, label]) => (
+              <div key={label} className="flex items-center gap-2.5 text-[11.5px] text-muted">
                 <span
                   className="w-6 shrink-0 rounded-full"
-                  style={{ height: weight as number, background: colour as string }}
+                  style={{ height: weight, background: colour }}
                 />
                 {label}
               </div>
@@ -39,34 +41,38 @@ export function Legend() {
               it, slowly where nothing closed it. Marsad reads declared policy and never observes
               traffic.
             </p>
-          </div>
+          </section>
 
-          <div className="space-y-1.5">
+          <section className="space-y-1.5">
             <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
-              Nodes
+              Cards
             </h4>
-            {[
-              [
-                'linear-gradient(135deg, oklch(0.72 0.15 255), oklch(0.72 0.15 155), oklch(0.72 0.15 305))',
-                'cluster node — colour by namespace',
-              ],
-              ['var(--node-domain)', 'domain'],
-              ['var(--node-cidr)', 'CIDR'],
-            ].map(([bg, label]) => (
-              <div key={label} className="flex items-center gap-2.5 text-[11.5px] text-muted">
-                <span className="size-2.5 shrink-0 rounded-full" style={{ background: bg }} />
-                {label}
-              </div>
-            ))}
             <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
-              <span className="size-2.5 shrink-0 rounded-full ring-2 ring-danger ring-inset" />
-              red ring — no policy selects it
+              <span
+                className="h-4 w-1 shrink-0 rounded-full"
+                style={{
+                  background:
+                    'linear-gradient(180deg, oklch(0.72 0.15 255), oklch(0.72 0.15 155))',
+                }}
+              />
+              the bar on the leading edge is the namespace
+            </div>
+            <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+              <span className="h-4 w-1 shrink-0 rounded-full bg-danger" />
+              red — no policy selects it
+            </div>
+            <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+              <span className="rounded-full border border-line bg-elevated px-1.5 text-[10px]">
+                3
+              </span>
+              replicas, or workloads in a namespace
             </div>
             <p className="pt-1 text-[11px] leading-relaxed text-faint">
-              The icon shows the workload kind; size grows with replicas, or with how many workloads
-              a namespace holds.
+              The kind glyph appears only where kinds differ — repeating it on every card would say
+              nothing. Zoom out far enough and cards become dots, so the shape of the cluster stays
+              readable.
             </p>
-          </div>
+          </section>
         </div>
       </PopoverContent>
     </Popover>
