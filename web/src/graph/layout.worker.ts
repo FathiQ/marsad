@@ -1,65 +1,87 @@
 /// <reference lib="webworker" />
-import Graph from 'graphology'
-import forceAtlas2 from 'graphology-layout-forceatlas2'
+import dagre from '@dagrejs/dagre'
 
-// ForceAtlas2 on a few thousand nodes blocks for seconds. Running it here keeps
-// panning and zooming responsive while a layout settles, which is the difference
-// between a graph that feels alive and one that appears frozen.
+/**
+ * Layered left-to-right layout.
+ *
+ * Force-directed was the wrong choice and it showed: it produces a hairball
+ * where every edge crosses every other, and no amount of node styling rescues
+ * that. Policy is directional — sources reach destinations — so a layered layout
+ * puts callers on the left and callees on the right and the picture becomes
+ * readable on its own.
+ *
+ * Dagre needs each node's real dimensions to reserve space, so the caller
+ * measures the cards on the main thread (text metrics need a canvas) and passes
+ * them in. Running the layout here keeps a large graph from freezing the canvas.
+ */
+
+export interface LayoutNode {
+  id: string
+  width: number
+  height: number
+  /** Nodes sharing a group are kept together, so a namespace stays contiguous
+   * rather than being scattered across the diagram. */
+  group?: string
+}
 
 export interface LayoutRequest {
-  nodes: { id: string; size: number }[]
+  nodes: LayoutNode[]
   edges: { source: string; target: string }[]
 }
 
 export type LayoutResult = Record<string, { x: number; y: number }>
 
-/**
- * Seeds positions on a circle rather than at random.
- *
- * Random seeding makes an unchanged cluster settle into a different shape on
- * every reload, which reads as the graph having changed when it has not. A
- * deterministic seed means the same input always produces the same picture.
- */
-function seed(index: number, total: number): { x: number; y: number } {
-  const angle = (2 * Math.PI * index) / Math.max(total, 1)
-  const radius = 10 + total * 0.12
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
-}
-
 self.onmessage = (event: MessageEvent<LayoutRequest>) => {
   const { nodes, edges } = event.data
+  const post = (result: LayoutResult) => (self as unknown as Worker).postMessage(result)
 
-  const graph = new Graph({ multi: false, type: 'directed' })
-  nodes.forEach((n, i) => graph.addNode(n.id, { ...seed(i, nodes.length), size: n.size }))
-  for (const e of edges) {
-    if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) continue
-    if (e.source === e.target || graph.hasEdge(e.source, e.target)) continue
-    graph.addDirectedEdge(e.source, e.target)
-  }
-
-  if (graph.order === 0) {
-    ;(self as unknown as Worker).postMessage({} satisfies LayoutResult)
+  if (nodes.length === 0) {
+    post({})
     return
   }
 
-  const inferred = forceAtlas2.inferSettings(graph)
-  const positions = forceAtlas2(graph, {
-    // Enough to settle without making a large cluster wait; the layout is
-    // recomputed on every graph change, so perfection here is wasted.
-    iterations: graph.order > 600 ? 120 : 320,
-    getEdgeWeight: null,
-    settings: {
-      ...inferred,
-      // Honour node size so big namespace nodes do not swallow their neighbours.
-      adjustSizes: true,
-      barnesHutOptimize: graph.order > 200,
-      // Gravity and scaling are scaled to the graph's size. A fixed spread that
-      // suits a thousand nodes flings a handful of them into the corners.
-      gravity: graph.order < 40 ? 3.5 : 1.4,
-      scalingRatio: graph.order < 40 ? 7 : 20,
-      slowDown: 3,
-    },
+  const g = new dagre.graphlib.Graph({ compound: true, multigraph: true })
+  g.setGraph({
+    rankdir: 'LR',
+    // Generous separation: cards are wide, and the whole point of the layered
+    // layout is that edges have room to be followed.
+    nodesep: 34,
+    ranksep: 130,
+    edgesep: 18,
+    marginx: 60,
+    marginy: 60,
+    ranker: 'network-simplex',
   })
+  g.setDefaultEdgeLabel(() => ({}))
 
-  ;(self as unknown as Worker).postMessage(positions as LayoutResult)
+  const groups = new Set<string>()
+  for (const n of nodes) {
+    if (n.group) groups.add(n.group)
+  }
+  for (const group of groups) {
+    g.setNode(`__group__${group}`, {})
+  }
+
+  for (const n of nodes) {
+    g.setNode(n.id, { width: n.width, height: n.height })
+    if (n.group) g.setParent(n.id, `__group__${n.group}`)
+  }
+
+  let index = 0
+  for (const e of edges) {
+    if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue
+    if (e.source === e.target) continue
+    g.setEdge(e.source, e.target, {}, `e${index++}`)
+  }
+
+  dagre.layout(g)
+
+  const result: LayoutResult = {}
+  for (const n of nodes) {
+    const laid = g.node(n.id) as { x?: number; y?: number } | undefined
+    if (laid && typeof laid.x === 'number' && typeof laid.y === 'number') {
+      result[n.id] = { x: laid.x, y: laid.y }
+    }
+  }
+  post(result)
 }

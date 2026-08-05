@@ -23,6 +23,8 @@ interface Props {
   onIncludeDefault: (value: boolean) => void
   animateFlow: boolean
   onAnimateFlow: (value: boolean) => void
+  showGroups: boolean
+  onShowGroups: (value: boolean) => void
   filters: Filters
   onFilters: (next: Filters) => void
   workloadKinds: string[]
@@ -114,6 +116,8 @@ export function FilterRail({
   onIncludeDefault,
   animateFlow,
   onAnimateFlow,
+  showGroups,
+  onShowGroups,
   filters,
   onFilters,
   workloadKinds,
@@ -215,13 +219,19 @@ export function FilterRail({
           </Section>
         )}
 
-        <Section icon={Eye} title="Motion">
+        <Section icon={Eye} title="Display">
           <div className="-mx-2">
             <Row
               checked={animateFlow}
               onChange={onAnimateFlow}
               label="Animate permitted paths"
               hint="Marsad reads declared policy, never observed traffic. The animation shows which paths a rule permits — not packets in flight."
+            />
+            <Row
+              checked={showGroups}
+              onChange={onShowGroups}
+              label="Group by namespace"
+              hint="Draws a container around the workloads of each namespace, so what belongs together is visible rather than inferred from colour."
             />
           </div>
         </Section>

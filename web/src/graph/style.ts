@@ -16,6 +16,7 @@ const CANVAS_PALETTE = {
   dark: {
     fg: oklch(0.96, 0.006, 265),
     muted: oklch(0.72, 0.02, 265),
+    faint: oklch(0.57, 0.022, 265),
     canvas: oklch(0.174, 0.016, 265),
     accent: oklch(0.68, 0.17, 255),
     allowed: oklch(0.76, 0.17, 155),
@@ -32,6 +33,7 @@ const CANVAS_PALETTE = {
   light: {
     fg: oklch(0.22, 0.02, 265),
     muted: oklch(0.47, 0.02, 265),
+    faint: oklch(0.63, 0.018, 265),
     canvas: oklch(0.995, 0.001, 265),
     accent: oklch(0.55, 0.2, 258),
     allowed: oklch(0.58, 0.15, 155),

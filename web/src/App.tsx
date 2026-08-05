@@ -84,6 +84,7 @@ export default function App() {
   const [includeDefault, setIncludeDefault] = useState(true)
   const [filters, setFilters] = useState<Filters>(defaultFilters)
   const [animateFlow, setAnimateFlow] = useState(true)
+  const [showGroups, setShowGroups] = useState(true)
 
   const [theme, setTheme] = useState<Theme>(initialTheme)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
@@ -224,6 +225,8 @@ export default function App() {
             onIncludeDefault={setIncludeDefault}
             animateFlow={animateFlow}
             onAnimateFlow={setAnimateFlow}
+            showGroups={showGroups}
+            onShowGroups={setShowGroups}
             filters={filters}
             onFilters={setFilters}
             workloadKinds={workloadKinds}
@@ -245,6 +248,7 @@ export default function App() {
                 palette={palette}
                 theme={theme}
                 animateFlow={animateFlow}
+                showGroups={showGroups}
                 selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
                 focusId={focusId}
                 onSelectNode={(n) => {
