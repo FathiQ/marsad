@@ -1,8 +1,15 @@
-# Marsad ships as a single static binary with the UI embedded in it.
-#
-# There is no frontend build stage yet: until step 3 lands, the binary embeds the
-# placeholder page checked in at internal/server/assets. When web/ exists, a
-# node stage builds it and writes into that directory before the Go build.
+# Marsad ships as a single static binary with the UI embedded in it, so deploying
+# is one image with no sidecar and no static-asset bucket.
+
+# The frontend builds first and in its own stage. It changes far less often than
+# the Go code, so a backend edit does not reinstall node_modules.
+FROM node:22-bookworm AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
 # --platform=$BUILDPLATFORM keeps the toolchain native to the build machine and
 # lets Go cross-compile to the target. Building an amd64 image on an arm64 Mac
 # therefore costs nothing; emulating an amd64 toolchain under QEMU would be
@@ -15,6 +22,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# The repo carries a placeholder page so `go build` works without node. Replace
+# it wholesale rather than merging, so a renamed asset cannot leave a stale file
+# embedded in the binary.
+RUN rm -rf internal/server/assets && mkdir -p internal/server/assets
+COPY --from=web /web/dist/ internal/server/assets/
 
 ARG VERSION=dev
 ARG TARGETOS

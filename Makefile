@@ -152,6 +152,31 @@ require-registry:
 		echo "set REGISTRY, e.g. make deploy REGISTRY=123456789012.dkr.ecr.eu-west-2.amazonaws.com/marsad"; \
 		exit 1; }
 
+## web-install: install frontend dependencies
+.PHONY: web-install
+web-install:
+	$(NODE) npm install --no-audit --no-fund
+
+## web-build: build the frontend into web/dist
+.PHONY: web-build
+web-build:
+	$(NODE) npm run build
+
+## web-lint: eslint and tsc over the frontend
+.PHONY: web-lint
+web-lint:
+	$(NODE) sh -c 'npx tsc --noEmit && npx eslint src --max-warnings 0'
+
+## e2e: Playwright smoke test over the built frontend
+.PHONY: e2e
+e2e:
+	$(COMPOSE) run --rm e2e sh -c 'npm run build && npm run e2e'
+
+## web-dev: Vite dev server on :5173, proxying /api to the backend on :8080
+.PHONY: web-dev
+web-dev:
+	$(COMPOSE) run --rm --service-ports web npm run dev -- --host
+
 ## sh: shell into the Go container
 .PHONY: sh
 sh:

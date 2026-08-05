@@ -58,10 +58,21 @@ implements, and [the build order](#build-order) for what comes next.
 Everything runs in Docker — no Go, Node, or Kubernetes tooling on your machine.
 
 ```sh
-make test    # run the test suite
-make lint    # golangci-lint
-make dev     # run the backend against your current kubeconfig on :8080
-make help    # all targets
+make test      # Go test suite
+make lint      # golangci-lint
+make vuln      # govulncheck
+make web-lint  # tsc + eslint
+make e2e       # Playwright smoke test
+make dev       # backend against your current kubeconfig on :8080
+make help      # all targets
+```
+
+For a local cluster with policies to look at:
+
+```sh
+make kind-up      # kind cluster + the AWS CRD + examples/
+make kind-deploy  # build, load and deploy into it
+kubectl --context kind-marsad -n marsad port-forward svc/marsad 8080:80
 ```
 
 See [docs/development.md](docs/development.md).
@@ -109,7 +120,7 @@ absent one.
 
 1. ✅ `pkg/npeval` — policy evaluation core, with tests
 2. ✅ Informer layer, graph model, REST + WebSocket API
-3. Frontend graph: namespace level, then drill-down
+3. ✅ Frontend graph: namespace level, then drill-down
 4. Findings engine and its UI surfacing
 5. Simulate panel, exports, Helm chart, CI polish
 

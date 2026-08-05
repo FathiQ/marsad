@@ -81,6 +81,18 @@ services:
     ports:
       - "8080:8080"
 
+  # Playwright's own image, because the browser needs system libraries that
+  # `playwright install --with-deps` would have to reinstall on every run in an
+  # ephemeral container. The tag must track @playwright/test in package.json.
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.62.1-noble
+    working_dir: /src/web
+    volumes:
+      - .:/src
+      - web-node-modules:/src/web/node_modules
+    environment:
+      CI: ${CI:-}
+
   lint:
     image: golangci/golangci-lint:v2.12.2
     working_dir: /src
