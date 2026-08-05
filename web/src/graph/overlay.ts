@@ -528,6 +528,30 @@ export class OverlayRenderer {
     zoom: number,
     elapsed: number,
   ) {
+    // Outgoing edges are fanned across the source card's trailing edge rather
+    // than all leaving its midpoint. Departing from one point bundles them into
+    // a single indistinguishable rope for the first hundred pixels, which is
+    // exactly where a reader is trying to work out what goes where.
+    const outgoing = new Map<string, string[]>()
+    for (const edge of this.edges) {
+      const list = outgoing.get(edge.source) ?? []
+      list.push(edge.id)
+      outgoing.set(edge.source, list)
+    }
+    for (const [source, ids] of outgoing) {
+      const from = centres.get(source)
+      if (!from) continue
+      ids.sort((a, b) => {
+        const ta = centres.get(this.edges.find((e) => e.id === a)!.target)
+        const tb = centres.get(this.edges.find((e) => e.id === b)!.target)
+        return (ta?.y ?? 0) - (tb?.y ?? 0)
+      })
+    }
+    const fanIndex = new Map<string, { index: number; total: number }>()
+    for (const [, ids] of outgoing) {
+      ids.forEach((id, index) => fanIndex.set(id, { index, total: ids.length }))
+    }
+
     for (const edge of this.edges) {
       const sourceCard = this.cardsById.get(edge.source)
       const targetCard = this.cardsById.get(edge.target)
@@ -538,7 +562,18 @@ export class OverlayRenderer {
       const dimmed =
         this.hovered !== null && edge.source !== this.hovered && edge.target !== this.hovered
 
-      const start = { x: from.x + (sourceCard.w * scale) / 2, y: from.y }
+      const fan = fanIndex.get(edge.id) ?? { index: 0, total: 1 }
+      const sourceH = (zoom < CHIP_SCALE ? HEADER_H : sourceCard.h) * scale
+      // Spread across the middle 70% of the card's height, so the outermost
+      // edges still visibly touch the card rather than its corners.
+      const spread = sourceH * 0.7
+      const offset =
+        fan.total > 1 ? (fan.index / (fan.total - 1) - 0.5) * spread : 0
+
+      const start = {
+        x: from.x + (sourceCard.w * scale) / 2,
+        y: from.y - (sourceCard.h * scale) / 2 + sourceH / 2 + offset,
+      }
       const end = this.attachPoint(
         targetCard,
         to,
@@ -569,19 +604,49 @@ export class OverlayRenderer {
       ctx.lineWidth = (edge.kind === 'default' ? 1 : 1.8) * Math.max(scale, 0.5)
       if (edge.kind === 'default') ctx.setLineDash([5 * scale, 4 * scale])
 
+      const headroom = (edge.kind === 'default' ? 4 : 5.5) * Math.max(scale, 0.6)
+      const tx = end.x - c2.x
+      const ty = end.y - c2.y
+      const tl = Math.hypot(tx, ty) || 1
+      const tip = { x: end.x - (tx / tl) * headroom, y: end.y - (ty / tl) * headroom }
+
       ctx.beginPath()
       ctx.moveTo(start.x, start.y)
-      ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, end.x, end.y)
+      ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, tip.x, tip.y)
       ctx.stroke()
       ctx.setLineDash([])
 
-      // The connector dot: it is what makes an edge land *on a port* rather than
-      // vaguely at a box.
-      if (!dimmed && zoom > CHIP_SCALE) {
+      // An arrowhead at the destination. Without one a policy graph is unreadable:
+      // "A relates to B" is not the same statement as "A may reach B", and the
+      // whole point is the direction.
+      if (!dimmed) {
+        const tangentX = end.x - c2.x
+        const tangentY = end.y - c2.y
+        const length = Math.hypot(tangentX, tangentY) || 1
+        const ux = tangentX / length
+        const uy = tangentY / length
+        const size = (edge.kind === 'default' ? 5 : 6.5) * Math.max(scale, 0.6)
+        const baseX = end.x - ux * size
+        const baseY = end.y - uy * size
+
         ctx.beginPath()
-        ctx.arc(end.x, end.y, 3 * scale, 0, Math.PI * 2)
+        ctx.moveTo(end.x, end.y)
+        ctx.lineTo(baseX - uy * size * 0.45, baseY + ux * size * 0.45)
+        ctx.lineTo(baseX + uy * size * 0.45, baseY - ux * size * 0.45)
+        ctx.closePath()
         ctx.fillStyle = colour
         ctx.fill()
+
+        // A small socket where the edge leaves, so a card shows what it reaches
+        // as well as what reaches it.
+        if (zoom > CHIP_SCALE) {
+          ctx.beginPath()
+          ctx.arc(start.x, start.y, 2.2 * scale, 0, Math.PI * 2)
+          ctx.fillStyle = colour
+          ctx.globalAlpha = (dimmed ? 0.12 : 0.75) as number
+          ctx.fill()
+          ctx.globalAlpha = dimmed ? 0.12 : edge.kind === 'default' ? 0.5 : 0.9
+        }
       }
 
       if (this.animate && !dimmed) {
