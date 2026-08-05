@@ -70,6 +70,10 @@ interface Card {
   unprotected: boolean
   showKind: boolean
   access: AccessPoint[]
+  /** Reachable from anything / able to reach anything, because no policy
+   * isolates it. Stated on the card rather than drawn as edges — see setData. */
+  openIn: boolean
+  openOut: boolean
   w: number
   h: number
 }
@@ -210,12 +214,49 @@ export class OverlayRenderer {
     this.palette = palette
     const ctx = this.measurer
 
+    /*
+     * Allowed-by-default edges become a property of the card, not a line.
+     *
+     * Every workload no policy isolates gets an edge to and from the "any"
+     * pseudo-node, so on a cluster with few policies that single node collects
+     * two edges per workload and the result is a hairball radiating from one
+     * point — the tangle that made the graph unreadable. Those lines also carry
+     * no information the card does not already show: it is already ringed red
+     * for being unprotected.
+     *
+     * So they are folded into two rows on the card. What remains drawn is the
+     * traffic somebody actually wrote a rule about, which is the whole question
+     * the graph exists to answer. An explicit allow-from-anywhere rule still
+     * draws a real edge, because that is a decision rather than an absence.
+     */
+    const openIn = new Set<string>()
+    const openOut = new Set<string>()
+    const drawn: GraphEdge[] = []
+
+    for (const e of graph.edges) {
+      if (e.kind === 'default') {
+        openIn.add(e.target)
+        openOut.add(e.source)
+        continue
+      }
+      drawn.push(e)
+    }
+
+    // A peer node left with nothing drawn is now pure clutter.
+    const referenced = new Set<string>()
+    for (const e of drawn) {
+      referenced.add(e.source)
+      referenced.add(e.target)
+    }
+    const isPeer = (n: GraphNode) => n.kind === 'any' || n.kind === 'world'
+    const nodes = graph.nodes.filter((n) => !isPeer(n) || referenced.has(n.id))
+
     // Access points are collected from *incoming* edges: they describe what a
     // workload accepts, which is the question its card should answer.
     const accessByNode = new Map<string, AccessPoint[]>()
     const keyed = new Map<string, Set<string>>()
 
-    for (const e of graph.edges) {
+    for (const e of drawn) {
       const list = accessByNode.get(e.target) ?? []
       const seen = keyed.get(e.target) ?? new Set<string>()
       const ports = e.ports?.length ? e.ports : ['all ports']
@@ -230,12 +271,10 @@ export class OverlayRenderer {
       keyed.set(e.target, seen)
     }
 
-    const kinds = new Set(
-      graph.nodes.filter((n) => n.kind === 'workload').map((n) => n.workloadKind),
-    )
+    const kinds = new Set(nodes.filter((n) => n.kind === 'workload').map((n) => n.workloadKind))
     const showKind = kinds.size > 1
 
-    this.cards = graph.nodes.map((n) => {
+    this.cards = nodes.map((n) => {
       // Cap the list: a workload reachable on forty ports is a finding, not a
       // card, and the drawer is where the full list belongs.
       const access = (accessByNode.get(n.id) ?? []).slice(0, 5)
@@ -248,6 +287,9 @@ export class OverlayRenderer {
         (max, a) => Math.max(max, ctx.measureText(`${a.label} ${a.protocol}`).width),
         0,
       )
+
+      const open = { in: openIn.has(n.id), out: openOut.has(n.id) }
+      const openRows = (open.in ? 1 : 0) + (open.out ? 1 : 0)
 
       const glyphW = n.kind === 'workload' && !showKind ? 0 : GLYPH + 8
       const badgeW = count > 1 ? 26 : 0
@@ -266,14 +308,16 @@ export class OverlayRenderer {
         unprotected: n.kind === 'namespace' ? (n.unprotected ?? 0) > 0 : isUnprotected(n),
         showKind: n.kind !== 'workload' || showKind,
         access,
-        w,
-        h: HEADER_H + (access.length ? access.length * ROW_H + 6 : 0),
+        openIn: open.in,
+        openOut: open.out,
+        w: Math.max(w, openRows ? 190 : 0),
+        h: HEADER_H + (access.length + openRows ? (access.length + openRows) * ROW_H + 6 : 0),
       }
     })
 
     this.cardsById = new Map(this.cards.map((c) => [c.id, c]))
 
-    this.edges = graph.edges.map((e) => {
+    this.edges = drawn.map((e) => {
       const target = this.cardsById.get(e.target)
       const first = e.ports?.length ? e.ports[0] : 'all ports'
       const [num] = (first ?? '').split('/')
@@ -552,6 +596,17 @@ export class OverlayRenderer {
       ids.forEach((id, index) => fanIndex.set(id, { index, total: ids.length }))
     }
 
+    // Two cards that reach each other produced two curves bowing the same way,
+    // which overlap into what looks like one line pointing at itself. Bowing
+    // them opposite ways turns the pair into a legible two-lane path. The
+    // direction is chosen by comparing the ids, so it is stable across renders.
+    const pairs = new Set(this.edges.map((e) => `${e.source}\u0000${e.target}`))
+    const bowed = new Map<string, number>()
+    for (const edge of this.edges) {
+      const reversed = pairs.has(`${edge.target}\u0000${edge.source}`)
+      bowed.set(edge.id, reversed ? (edge.source < edge.target ? 1 : -1) : 0)
+    }
+
     for (const edge of this.edges) {
       const sourceCard = this.cardsById.get(edge.source)
       const targetCard = this.cardsById.get(edge.target)
@@ -584,8 +639,9 @@ export class OverlayRenderer {
       // Horizontal control points: the layout is left-to-right, so a curve that
       // leaves and arrives horizontally reads as a route rather than a rubber band.
       const dx = Math.max(36 * scale, Math.abs(end.x - start.x) * 0.42)
-      const c1 = { x: start.x + dx, y: start.y }
-      const c2 = { x: end.x - dx, y: end.y }
+      const bow = (bowed.get(edge.id) ?? 0) * 26 * scale
+      const c1 = { x: start.x + dx, y: start.y + bow }
+      const c2 = { x: end.x - dx, y: end.y + bow }
 
       const samples: { x: number; y: number }[] = []
       for (let i = 0; i <= 14; i++) {
@@ -769,8 +825,39 @@ export class OverlayRenderer {
         ctx.textAlign = 'left'
       }
 
-      // Access points
+      // Access points, then the open rows. Both are drawn as rows so the card
+      // reads as one list of "what can reach me, and how".
       if (!compact) {
+        const openRows: { label: string; incoming: boolean }[] = []
+        if (card.openIn) openRows.push({ label: 'open from anything', incoming: true })
+        if (card.openOut) openRows.push({ label: 'open to anything', incoming: false })
+
+        openRows.forEach((row, i) => {
+          const rowY = y + (HEADER_H + 6 + (card.access.length + i) * ROW_H + ROW_H / 2) * scale
+
+          ctx.strokeStyle = danger
+          ctx.lineWidth = 1.2 * scale
+          ctx.beginPath()
+          if (row.incoming) {
+            ctx.moveTo(x + 10 * scale, rowY)
+            ctx.lineTo(x + 20 * scale, rowY)
+            ctx.moveTo(x + 17 * scale, rowY - 2.5 * scale)
+            ctx.lineTo(x + 20 * scale, rowY)
+            ctx.lineTo(x + 17 * scale, rowY + 2.5 * scale)
+          } else {
+            ctx.moveTo(x + 20 * scale, rowY)
+            ctx.lineTo(x + 10 * scale, rowY)
+            ctx.moveTo(x + 13 * scale, rowY - 2.5 * scale)
+            ctx.lineTo(x + 10 * scale, rowY)
+            ctx.lineTo(x + 13 * scale, rowY + 2.5 * scale)
+          }
+          ctx.stroke()
+
+          ctx.font = `500 ${Math.round(10.5 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+          ctx.fillStyle = danger
+          ctx.fillText(row.label, x + 26 * scale, rowY)
+        })
+
         card.access.forEach((point, i) => {
           const rowY = y + (HEADER_H + 6 + i * ROW_H + ROW_H / 2) * scale
           const colour = edgeColor({ kind: point.kind } as GraphEdge)

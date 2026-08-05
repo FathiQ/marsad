@@ -66,7 +66,6 @@ export function Legend() {
               {(
                 [
                   ['var(--allowed)', 3, 'allowed by a rule'],
-                  ['var(--neutral-edge)', 1, 'allowed by default — nothing isolates it'],
                   ['var(--approx)', 3, 'depends on DNS at runtime'],
                 ] as const
               ).map(([colour, weight, label]) => (
@@ -79,10 +78,15 @@ export function Legend() {
                 </div>
               ))}
 
+              <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+                <span className="w-6 shrink-0 text-center text-[11px] text-danger">→</span>
+                open from / to anything — no policy isolates it
+              </div>
               <p className="pt-1 text-[11px] leading-relaxed text-faint">
-                Dots trace the direction a path is <em>permitted</em> in — briskly where a rule
-                opened it, slowly where nothing closed it. Marsad reads declared policy and never
-                observes traffic.
+                Traffic permitted only because nothing forbids it is shown on the card, not as a
+                line: every unprotected workload would otherwise draw two edges to one node and
+                bury the rules somebody actually wrote. Dots trace the direction a path is{' '}
+                <em>permitted</em> in. Marsad reads declared policy and never observes traffic.
               </p>
             </section>
 
