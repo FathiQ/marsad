@@ -233,8 +233,15 @@ export function openStream(
       }
     }
     socket.onclose = () => {
-      onStatus(false)
+      // A deliberately closed socket must not report offline. Changing the
+      // graph query tears this stream down and opens a replacement, and the old
+      // socket's close event arrives *after* the new one has already connected —
+      // so reporting here overwrites a healthy status with a stale one, and
+      // nothing ever sets it back. The badge then reads offline while updates
+      // are arriving normally.
       if (closed) return
+
+      onStatus(false)
       retry = Math.min(retry + 1, 6)
       timer = window.setTimeout(connect, Math.min(1000 * 2 ** retry, 30_000))
     }

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { mockApi } from './fixtures'
+import { graph, mockApi } from './fixtures'
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page)
@@ -140,6 +140,25 @@ test('the graph keeps painting through a zoom gesture', async ({ page }) => {
   const peak = Math.max(...samples)
   expect(Math.min(...samples)).toBeGreaterThan(0)
   expect(Math.min(...samples)).toBeGreaterThan(peak * 0.35)
+})
+
+test('stays live when the graph query changes', async ({ page }) => {
+  // Changing the query tears the stream down and opens a replacement. The old
+  // socket's close event arrives *after* the new one has connected, and it used
+  // to report "offline" — overwriting a healthy status with a stale one, with
+  // nothing to set it back. The badge then read offline while updates were
+  // arriving normally, which is worse than useless: it is a lie about freshness.
+  await page.routeWebSocket(/\/api\/stream/, (ws) => {
+    ws.send(JSON.stringify({ type: 'graph', revision: 1, graph }))
+  })
+  await page.reload()
+
+  await expect(page.getByText('live')).toBeVisible()
+
+  await page.getByRole('radio', { name: 'Workload' }).click()
+  await page.waitForTimeout(1200)
+  await expect(page.getByText('live')).toBeVisible()
+  await expect(page.getByText('offline')).toBeHidden()
 })
 
 test('reports the websocket being down rather than looking live', async ({ page }) => {

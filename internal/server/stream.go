@@ -41,10 +41,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := websocket.Accept(w, r, acceptOpts)
 	if err != nil {
-		s.log.Debug("websocket accept failed", "error", err)
+		s.log.Warn("stream: accept failed", "error", err, "remote", r.RemoteAddr)
 		return
 	}
 	defer conn.CloseNow() //nolint:errcheck // best effort on teardown
+
+	// Logged at info because a client that keeps reconnecting is a real symptom,
+	// and the first place anyone looks is the pod log. It was silent before.
+	opened := time.Now()
+	s.log.Info("stream: opened", "remote", r.RemoteAddr, "query", r.URL.RawQuery)
+	defer func() {
+		s.log.Info("stream: closed", "remote", r.RemoteAddr, "lasted", time.Since(opened).Round(time.Millisecond))
+	}()
 
 	ctx := r.Context()
 
