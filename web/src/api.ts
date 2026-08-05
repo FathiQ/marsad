@@ -35,8 +35,11 @@ export interface GraphEdge {
   ports?: string[]
   /** Set when the edge carries only port 53, so DNS can be folded away. */
   dns?: boolean
-  /** The rules that produced this edge. Clicking through to them is the point. */
-  via: string[]
+  /** The rules that produced this edge. Clicking through to them is the point.
+   * Always an array from a correct server — an allowed-by-default edge has none
+   * — but treated as optional here so a contract violation degrades instead of
+   * blanking the page. */
+  via?: string[]
   note?: string
 }
 

@@ -94,11 +94,34 @@ test('filters hide elements and say how many', async ({ page }) => {
   await expect(page.getByText(/\d+ hidden/)).toBeHidden()
 })
 
-test('the legend explains that motion means permitted, not observed', async ({ page }) => {
+test('the legend opens on screen and explains that motion means permitted', async ({ page }) => {
   // Marsad reads declared policy. Animated edges must not be mistaken for
   // observed traffic, so the legend says which it is.
+  //
+  // The viewport assertion matters as much as the text one: the previous
+  // implementation opened 684px above the top of the window, so pressing the
+  // button appeared to do nothing — and this test still passed, because
+  // toBeVisible only requires a non-empty box, not one you can see.
   await page.getByRole('button', { name: 'Legend' }).click()
-  await expect(page.getByText(/never observes traffic/)).toBeVisible()
+
+  const panel = page.getByRole('dialog', { name: 'Legend' })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText(/never observes traffic/)).toBeVisible()
+
+  const box = await panel.boundingBox()
+  const viewport = page.viewportSize()!
+  expect(box).not.toBeNull()
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+})
+
+test('escape closes the legend', async ({ page }) => {
+  await page.getByRole('button', { name: 'Legend' }).click()
+  await expect(page.getByRole('dialog', { name: 'Legend' })).toBeVisible()
+  await page.locator('body').press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Legend' })).toBeHidden()
 })
 
 test('namespace filter is selectable from the rail', async ({ page }) => {
@@ -159,6 +182,22 @@ test('stays live when the graph query changes', async ({ page }) => {
   await page.waitForTimeout(1200)
   await expect(page.getByText('live')).toBeVisible()
   await expect(page.getByText('offline')).toBeHidden()
+})
+
+test('survives an edge whose rule list is null', async ({ page }) => {
+  // An allowed-by-default edge has no rules behind it, and the server was
+  // sending `via: null` rather than `[]`. Reading .length on it threw during
+  // render, React unmounted the entire tree, and the dashboard went black — a
+  // failure that looks like the cluster is unreachable when the data arrived
+  // fine. The server no longer sends null; this proves the UI copes anyway.
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByRole('option', { name: /legacy/ }).first().click()
+  await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible()
+
+  // The shell must still be there — a blank page is what the bug looked like.
+  await expect(page.getByRole('banner')).toBeVisible()
+  await expect(page.locator('main canvas').first()).toBeVisible()
 })
 
 test('reports the websocket being down rather than looking live', async ({ page }) => {

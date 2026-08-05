@@ -1,80 +1,134 @@
-import { Info } from 'lucide-react'
+import { Info, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Button } from './ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 
-/** The graph uses colour, shape and motion to mean things; saying which is
- * cheaper than making people infer it. Kept in a popover so it explains on
- * demand rather than permanently occupying a corner of the canvas. */
+/**
+ * The graph uses colour, shape and motion to mean things; saying which is
+ * cheaper than making people infer it.
+ *
+ * Deliberately not a Radix popover. This is a static panel pinned to a known
+ * corner, and the portalled floating-ui positioning a popover brings was placing
+ * it 684 pixels above the viewport — off-screen, so pressing the button appeared
+ * to do nothing at all. A panel positioned by the layout that owns the corner
+ * cannot land anywhere else, and there is no collision maths to get wrong.
+ */
 export function Legend() {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
-          <Info className="size-3.5" />
-          Legend
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[21rem] p-3.5">
-        <div className="space-y-3.5">
-          <section className="space-y-1.5">
-            <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
-              Connections
-            </h4>
-            {(
-              [
-                ['var(--allowed)', 3, 'allowed by a rule'],
-                ['var(--neutral-edge)', 1, 'allowed by default — nothing isolates it'],
-                ['var(--approx)', 3, 'depends on DNS at runtime'],
-              ] as const
-            ).map(([colour, weight, label]) => (
-              <div key={label} className="flex items-center gap-2.5 text-[11.5px] text-muted">
-                <span
-                  className="w-6 shrink-0 rounded-full"
-                  style={{ height: weight, background: colour }}
-                />
-                {label}
-              </div>
-            ))}
-            <p className="pt-1 text-[11px] leading-relaxed text-faint">
-              Dots trace the direction a path is <em>permitted</em> in — briskly where a rule opened
-              it, slowly where nothing closed it. Marsad reads declared policy and never observes
-              traffic.
-            </p>
-          </section>
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
 
-          <section className="space-y-1.5">
-            <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
-              Cards
-            </h4>
-            <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
-              <span
-                className="h-4 w-1 shrink-0 rounded-full"
-                style={{
-                  background:
-                    'linear-gradient(180deg, oklch(0.72 0.15 255), oklch(0.72 0.15 155))',
-                }}
-              />
-              the bar on the leading edge is the namespace
-            </div>
-            <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
-              <span className="h-4 w-1 shrink-0 rounded-full bg-danger" />
-              red — no policy selects it
-            </div>
-            <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
-              <span className="rounded-full border border-line bg-elevated px-1.5 text-[10px]">
-                3
-              </span>
-              replicas, or workloads in a namespace
-            </div>
-            <p className="pt-1 text-[11px] leading-relaxed text-faint">
-              The kind glyph appears only where kinds differ — repeating it on every card would say
-              nothing. Zoom out far enough and cards become dots, so the shape of the cluster stays
-              readable.
-            </p>
-          </section>
+  useEffect(() => {
+    if (!open) return
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+
+    window.addEventListener('keydown', onKey)
+    // Deferred by a tick: the click that opened the panel would otherwise be the
+    // one that closes it again.
+    const timer = window.setTimeout(() => window.addEventListener('mousedown', onClick), 0)
+
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mousedown', onClick)
+      window.clearTimeout(timer)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Legend"
+          className="absolute bottom-full left-0 mb-2 w-[21rem] rounded-xl border border-line bg-elevated p-3.5 shadow-2xl"
+        >
+          <div className="space-y-3.5">
+            <section className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
+                  Connections
+                </h4>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close legend"
+                >
+                  <X />
+                </Button>
+              </div>
+
+              {(
+                [
+                  ['var(--allowed)', 3, 'allowed by a rule'],
+                  ['var(--neutral-edge)', 1, 'allowed by default — nothing isolates it'],
+                  ['var(--approx)', 3, 'depends on DNS at runtime'],
+                ] as const
+              ).map(([colour, weight, label]) => (
+                <div key={label} className="flex items-center gap-2.5 text-[11.5px] text-muted">
+                  <span
+                    className="w-6 shrink-0 rounded-full"
+                    style={{ height: weight, background: colour }}
+                  />
+                  {label}
+                </div>
+              ))}
+
+              <p className="pt-1 text-[11px] leading-relaxed text-faint">
+                Dots trace the direction a path is <em>permitted</em> in — briskly where a rule
+                opened it, slowly where nothing closed it. Marsad reads declared policy and never
+                observes traffic.
+              </p>
+            </section>
+
+            <section className="space-y-1.5">
+              <h4 className="text-[10.5px] font-semibold tracking-[0.07em] text-faint uppercase">
+                Cards
+              </h4>
+              <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+                <span
+                  className="h-4 w-1 shrink-0 rounded-full"
+                  style={{
+                    background:
+                      'linear-gradient(180deg, oklch(0.72 0.15 255), oklch(0.72 0.15 155))',
+                  }}
+                />
+                the bar on the leading edge is the namespace
+              </div>
+              <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+                <span className="h-4 w-1 shrink-0 rounded-full bg-danger" />
+                red — no policy selects it
+              </div>
+              <div className="flex items-center gap-2.5 text-[11.5px] text-muted">
+                <span className="shrink-0 rounded-full border border-line bg-surface px-1.5 text-[10px]">
+                  3
+                </span>
+                replicas, or workloads in a namespace
+              </div>
+              <p className="pt-1 text-[11px] leading-relaxed text-faint">
+                Rows beneath a name are its <em>access points</em> — the ports it accepts. An edge
+                ends on the port it reaches, so a line says which door it goes through.
+              </p>
+            </section>
+          </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      )}
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="gap-1.5"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Info className="size-3.5" />
+        Legend
+      </Button>
+    </div>
   )
 }

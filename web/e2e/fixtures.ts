@@ -87,7 +87,9 @@ export const graph = {
       source: 'any:all',
       target: 'wl:prod/Deployment/legacy',
       kind: 'default',
-      via: [],
+      // Deliberately null, not []. This is what a server that violates its own
+      // contract sends, and it used to crash the whole page on click.
+      via: null as unknown as string[],
       note: 'no policy isolates this workload',
     },
   ],

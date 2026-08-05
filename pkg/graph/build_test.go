@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -367,6 +368,33 @@ func TestWorkloadLevelOmitsUnusedNamespaceNodes(t *testing.T) {
 	ns := graph.Build(e, graph.Options{Level: graph.LevelNamespace, IncludeDefault: false})
 	if !slices.Contains(nodeIDs(ns), "ns:empty") {
 		t.Errorf("namespace level should show empty namespaces, got %v", nodeIDs(ns))
+	}
+}
+
+// A nil slice marshals to null, and `via` is declared as an array. A client
+// that trusts the contract crashes on null — which is exactly what happened.
+func TestViaIsNeverNil(t *testing.T) {
+	e := build(t,
+		npeval.Namespace{Name: "prod"},
+		deploy("prod", "api", "app", "api"),
+	)
+
+	g := graph.Build(e, graph.Options{Level: graph.LevelWorkload, IncludeDefault: true})
+	if len(g.Edges) == 0 {
+		t.Fatal("expected an allowed-by-default edge")
+	}
+	for _, edge := range g.Edges {
+		if edge.Via == nil {
+			t.Errorf("edge %s has a nil Via; it must marshal as [] not null", edge.ID)
+		}
+	}
+
+	encoded, err := json.Marshal(g.Edges[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"via":null`) {
+		t.Errorf("via serialised as null: %s", encoded)
 	}
 }
 

@@ -160,13 +160,13 @@ function EdgeBody({ edge, nodesById }: { edge: GraphEdge; nodesById: Map<string,
       </Section>
 
       <Section title="Produced by">
-        {edge.via.length === 0 ? (
+        {!edge.via?.length ? (
           <p className="text-[12.5px] text-faint">
             Nothing produced this edge — it exists because no policy isolates the workload.
           </p>
         ) : (
           <div className="space-y-1 rounded-lg border border-line bg-bg p-3">
-            {edge.via.map((v) => (
+            {edge.via?.map((v) => (
               <code key={v} className="block font-mono text-[10.5px] break-all text-muted">
                 {v}
               </code>

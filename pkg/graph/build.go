@@ -78,6 +78,12 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 		e := b.edges[id]
 		slices.Sort(e.Via)
 		e.Via = slices.Compact(e.Via)
+		// An allowed-by-default edge has no rules behind it, and a nil slice
+		// marshals to null rather than []. The field is declared as an array, so
+		// emitting null breaks every client that believes the contract.
+		if e.Via == nil {
+			e.Via = []npeval.RuleID{}
+		}
 		g.Edges = append(g.Edges, *e)
 	}
 	return g
