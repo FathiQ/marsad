@@ -10,7 +10,9 @@ import type { Graph as GraphData, GraphEdge, GraphNode } from '../api'
 import { iconFor } from '../graph/icons'
 import { FlowRenderer, type FlowEdge } from '../graph/flow'
 import {
-  dimmed,
+  dimmedEdge,
+  dimmedFill,
+  dimmedRing,
   edgeColor,
   edgeLabel,
   edgeSize,
@@ -34,10 +36,11 @@ const NodeRing = createNodeBorderProgram({
   ],
 })
 
-// keepWithinCircle would have the program paint its own disc, covering the ring
-// and fill beneath it and leaving a flat blob.
+// Icons are drawn as tinted masks so the disc keeps its namespace colour and
+// the ring keeps its warning. keepWithinCircle stays off: it would have the
+// program paint its own disc over both.
 const NodePictogram = createNodeImageProgram({
-  padding: 0.36,
+  padding: 0.38,
   size: { mode: 'force', value: 256 },
   drawingMode: 'color',
   colorAttribute: 'pictoColor',
@@ -47,6 +50,40 @@ const NodePictogram = createNodeImageProgram({
 const NodeProgram = createNodeCompoundProgram([NodeRing, NodePictogram])
 
 const CURVATURE = 0.22
+
+/**
+ * Sigma's built-in hover renderer paints a white label plate, which on a dark
+ * canvas reads as a rendering artefact rather than as emphasis. This draws the
+ * same information in the app's own palette.
+ */
+function drawNodeHover(
+  ctx: CanvasRenderingContext2D,
+  data: { x: number; y: number; size: number; label?: string | null },
+  settings: { labelSize: number; labelFont: string; labelWeight: string },
+) {
+  const label = data.label
+  if (!label) return
+
+  ctx.font = `${settings.labelWeight} ${settings.labelSize}px ${settings.labelFont}`
+  const padX = 8
+  const height = settings.labelSize + 10
+  const width = ctx.measureText(label).width + padX * 2
+  const x = data.x + data.size + 6
+  const y = data.y - height / 2
+  const radius = height / 2
+
+  ctx.beginPath()
+  ctx.roundRect(x, y, width, height, radius)
+  ctx.fillStyle = paint('plate')
+  ctx.fill()
+  ctx.strokeStyle = paint('plateEdge')
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  ctx.fillStyle = paint('fg')
+  ctx.textBaseline = 'middle'
+  ctx.fillText(label, x + padX, data.y)
+}
 
 interface Props {
   data: GraphData
@@ -112,6 +149,7 @@ export function GraphCanvas({
       edgeLabelColor: { attribute: 'color' },
       edgeLabelFont: 'ui-monospace, SFMono-Regular, monospace',
       edgeLabelSize: 10.5,
+      defaultDrawNodeHover: drawNodeHover,
       zIndex: true,
       minCameraRatio: 0.05,
       maxCameraRatio: 12,
@@ -170,17 +208,21 @@ export function GraphCanvas({
       const res = { ...attrs } as Record<string, unknown>
       const active = hovered.current
 
+      // Deliberately not `highlighted: true`: Sigma renders that as a white
+      // label plate, which on a dark canvas reads as a rendering artefact.
+      // Selection is shown by the ring instead.
       if (key === selectedId) {
-        res.highlighted = true
         res.borderColor = paint('accent')
         res.zIndex = 3
       }
       if (active) {
         const related = key === active || graph.current.neighbors(active).includes(key)
         if (!related) {
-          res.color = dimmed()
-          res.borderColor = dimmed()
-          res.pictoColor = 'rgba(0,0,0,0)'
+          // Contrast is drained but the shape and icon stay: a hover that turns
+          // the rest of the graph into featureless blobs is worse than none.
+          res.color = dimmedFill()
+          res.borderColor = dimmedRing()
+          res.pictoColor = dimmedRing()
           res.label = ''
           res.zIndex = 0
         } else {
@@ -202,7 +244,7 @@ export function GraphCanvas({
       if (active) {
         const [source, target] = graph.current.extremities(key)
         if (source !== active && target !== active) {
-          res.color = dimmed()
+          res.color = dimmedEdge()
           res.label = ''
           res.zIndex = 0
         } else {

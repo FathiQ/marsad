@@ -9,10 +9,15 @@ import { edgeColor } from './style'
  * An important honesty constraint shapes this: Marsad reads *declared policy*,
  * never observed traffic. Particles moving along an edge would ordinarily mean
  * "packets are flowing here", and that is not something Marsad knows. So the
- * animation represents a path being *permitted*, the UI calls it that, and it is
- * only ever drawn on edges an explicit rule allows — never on the grey
- * allowed-by-default ones, where animating would imply activity through a hole
- * nobody opened deliberately.
+ * animation represents a path being *permitted*, and the UI says so plainly in
+ * its control and its legend.
+ *
+ * Every permitted path animates, including the allowed-by-default ones — a
+ * static line does not read as a path at all, and the whole point of the graph
+ * is which routes are open. The distinction is carried by speed and weight
+ * instead: paths a rule deliberately opened move briskly and brightly; paths
+ * open only because nothing closed them drift slowly and dimly, which reads as
+ * seepage rather than as intent.
  *
  * Drawn on a canvas above Sigma's own rather than as a WebGL edge program: the
  * particle count is small, the geometry has to match Sigma's curved edges
@@ -20,9 +25,18 @@ import { edgeColor } from './style'
  * renderer's state.
  */
 
-const PARTICLES_PER_EDGE = 3
-const SPEED = 0.00022 // progress per millisecond
-const PARTICLE_RADIUS = 2.1
+interface Style {
+  particles: number
+  speed: number // progress per millisecond
+  radius: number
+  alpha: number
+}
+
+const STYLES: Record<FlowEdge['kind'], Style> = {
+  allowed: { particles: 3, speed: 0.00026, radius: 2.2, alpha: 1 },
+  approximate: { particles: 3, speed: 0.00026, radius: 2.2, alpha: 1 },
+  default: { particles: 2, speed: 0.00009, radius: 1.5, alpha: 0.5 },
+}
 
 export interface FlowEdge {
   id: string
@@ -80,8 +94,7 @@ export class FlowRenderer {
   ) {}
 
   setEdges(edges: FlowEdge[]) {
-    // Only explicitly allowed paths animate. See the note at the top of the file.
-    this.edges = edges.filter((e) => e.kind !== 'default')
+    this.edges = edges
   }
 
   /** Restricts the animation to a subset — used so hovering a node animates only
@@ -147,26 +160,29 @@ export class FlowRenderer {
       const span = Math.hypot(to.x - from.x, to.y - from.y)
       if (span < 24) continue
 
+      const style = STYLES[edge.kind]
       const colour = edgeColor({ kind: edge.kind } as GraphEdge)
-      const phase = (elapsed * SPEED) % 1
+      const phase = (elapsed * style.speed) % 1
 
-      for (let i = 0; i < PARTICLES_PER_EDGE; i++) {
-        const t0 = (phase + i / PARTICLES_PER_EDGE) % 1
+      for (let i = 0; i < style.particles; i++) {
+        const t0 = (phase + i / style.particles) % 1
         const [px, py] = pointOnCurve(t0, from.x, from.y, cx, cy, to.x, to.y)
 
         // Fade in and out at the ends so particles emerge from the source and
         // dissolve into the target rather than blinking on and off.
         const fade = Math.sin(t0 * Math.PI)
-        ctx.globalAlpha = 0.25 + fade * 0.75
+        ctx.globalAlpha = (0.2 + fade * 0.8) * style.alpha
 
         ctx.beginPath()
-        ctx.arc(px, py, PARTICLE_RADIUS, 0, Math.PI * 2)
+        ctx.arc(px, py, style.radius, 0, Math.PI * 2)
         ctx.fillStyle = colour
         ctx.fill()
 
-        ctx.globalAlpha = (0.1 + fade * 0.3) * 0.6
+        // A soft halo behind each dot so it reads against a line of the same
+        // colour instead of disappearing into it.
+        ctx.globalAlpha = fade * 0.22 * style.alpha
         ctx.beginPath()
-        ctx.arc(px, py, PARTICLE_RADIUS * 2.6, 0, Math.PI * 2)
+        ctx.arc(px, py, style.radius * 2.8, 0, Math.PI * 2)
         ctx.fillStyle = colour
         ctx.fill()
       }

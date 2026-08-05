@@ -26,6 +26,8 @@ const CANVAS_PALETTE = {
     cidr: oklch(0.75, 0.16, 55),
     world: oklch(0.68, 0.19, 22),
     picto: oklch(0.18, 0.015, 265),
+    plate: oklch(0.245, 0.019, 265),
+    plateEdge: oklch(0.37, 0.02, 265),
   },
   light: {
     fg: oklch(0.22, 0.02, 265),
@@ -40,6 +42,8 @@ const CANVAS_PALETTE = {
     cidr: oklch(0.62, 0.16, 50),
     world: oklch(0.56, 0.2, 25),
     picto: oklch(0.99, 0, 0),
+    plate: oklch(1, 0, 0),
+    plateEdge: oklch(0.84, 0.008, 265),
   },
 } as const
 
@@ -124,6 +128,11 @@ export function oklch(l: number, c: number, h: number): string {
  * belonging together reads as belonging together — the single most useful thing
  * colour can do on this graph. External peers keep fixed, non-namespace colours.
  */
+/**
+ * Node fill. Cluster nodes take their namespace's hue so that everything
+ * belonging together reads as belonging together — the single most useful thing
+ * colour can do on this graph. External peers keep fixed, non-namespace colours.
+ */
 export function nodeColor(node: GraphNode, palette: NamespacePalette): string {
   const light = isLight()
   switch (node.kind) {
@@ -131,8 +140,8 @@ export function nodeColor(node: GraphNode, palette: NamespacePalette): string {
     case 'workload': {
       const hue = hueFor(palette, node.namespace ?? node.label)
       return node.kind === 'namespace'
-        ? oklch(light ? 0.62 : 0.7, 0.15, hue)
-        : oklch(light ? 0.68 : 0.76, 0.12, hue)
+        ? oklch(light ? 0.64 : 0.72, 0.15, hue)
+        : oklch(light ? 0.7 : 0.78, 0.13, hue)
     }
     case 'world':
     case 'any':
@@ -151,10 +160,13 @@ export function nodeColor(node: GraphNode, palette: NamespacePalette): string {
  * one thing a viewer should spot without reading a single label.
  */
 export function nodeBorderColor(node: GraphNode, palette: NamespacePalette): string {
+  // Red means no policy selects the workload at all — the one signal a viewer
+  // must be able to catch without reading a single label, so it overrides
+  // everything else the ring might otherwise say.
   if (isUnprotected(node)) return paint('danger')
   if (node.kind === 'namespace' || node.kind === 'workload') {
     const hue = hueFor(palette, node.namespace ?? node.label)
-    return oklch(isLight() ? 0.5 : 0.42, 0.12, hue)
+    return oklch(isLight() ? 0.46 : 0.4, 0.11, hue)
   }
   return paint('canvas')
 }
@@ -213,7 +225,22 @@ export function isUnprotected(node: GraphNode): boolean {
   return false
 }
 
-/** Dimmed variant used when hover isolates a neighbourhood. */
-export function dimmed(): string {
-  return isLight() ? 'rgba(120,132,150,0.18)' : 'rgba(110,124,150,0.13)'
+/**
+ * Dimming for the hover state.
+ *
+ * The first attempt replaced unrelated nodes with a flat grey disc and hid their
+ * icons, which turned a hover into a screen full of featureless blobs — worse
+ * than no dimming at all. Keeping the shape and icon and merely draining the
+ * contrast preserves the picture while pushing it back.
+ */
+export function dimmedFill(): string {
+  return isLight() ? oklch(0.95, 0.004, 265) : oklch(0.32, 0.012, 265)
+}
+
+export function dimmedRing(): string {
+  return isLight() ? oklch(0.88, 0.006, 265) : oklch(0.38, 0.014, 265)
+}
+
+export function dimmedEdge(): string {
+  return isLight() ? 'rgba(120,132,150,0.30)' : 'rgba(120,134,160,0.22)'
 }

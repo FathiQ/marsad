@@ -300,21 +300,27 @@ func TestSubscribersReceiveUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	timeout := time.After(15 * time.Second)
+	// Assert eventually, not on the first update. A debounced publish can be
+	// triggered by an earlier event and land before the new deployment has
+	// reached the informer cache; that is correct behaviour, not a missed
+	// update, and asserting on the first arrival makes the test flaky.
+	timeout := time.After(20 * time.Second)
 	for {
 		select {
-		case s := <-updates:
+		case s, ok := <-updates:
+			if !ok {
+				t.Fatal("subscription closed before the change was observed")
+			}
 			if s.Revision <= before {
-				continue // a publish that was already in flight
+				continue
 			}
-			if _, ok := s.Snapshot.Workload(npeval.ObjectRef{
+			if _, found := s.Snapshot.Workload(npeval.ObjectRef{
 				Group: "apps", Kind: "Deployment", Namespace: "prod", Name: "new",
-			}); !ok {
-				t.Errorf("revision %d does not contain the new deployment", s.Revision)
+			}); found {
+				return
 			}
-			return
 		case <-timeout:
-			t.Fatal("no update after a cluster change")
+			t.Fatal("the new deployment never appeared in a published snapshot")
 		}
 	}
 }

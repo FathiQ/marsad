@@ -35,8 +35,9 @@ export function Legend() {
               </div>
             ))}
             <p className="pt-1 text-[11px] leading-relaxed text-faint">
-              Animated dots mark a path a rule <em>permits</em>. Marsad reads declared policy — it
-              never observes traffic.
+              Dots trace the direction a path is <em>permitted</em> in — briskly where a rule opened
+              it, slowly where nothing closed it. Marsad reads declared policy and never observes
+              traffic.
             </p>
           </div>
 
