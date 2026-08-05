@@ -1,6 +1,7 @@
 package npeval
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -83,6 +84,33 @@ func (r Result) String() string {
 	}
 }
 
+// resultTokens are the wire form. A client should not have to know that denied
+// happens to be the third constant declared, so these travel as names.
+var resultTokens = map[Result]string{
+	ResultNotApplicable: "not-applicable",
+	ResultAllowed:       "allowed",
+	ResultDenied:        "denied",
+	ResultUndecidable:   "undecidable",
+}
+
+// MarshalJSON encodes the name rather than the ordinal.
+func (r Result) MarshalJSON() ([]byte, error) { return json.Marshal(resultTokens[r]) }
+
+// UnmarshalJSON accepts the name, so a verdict survives a round trip.
+func (r *Result) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	for k, v := range resultTokens {
+		if v == s {
+			*r = k
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown result %q", s)
+}
+
 // Reason explains a Result.
 type Reason int
 
@@ -120,6 +148,34 @@ func (r Reason) String() string {
 	default:
 		return ""
 	}
+}
+
+var reasonTokens = map[Reason]string{
+	ReasonNone:             "",
+	ReasonNotIsolated:      "not-isolated",
+	ReasonMatchedRule:      "matched-rule",
+	ReasonNoMatchingRule:   "no-matching-rule",
+	ReasonNoPolicySelects:  "no-policy-selects",
+	ReasonUnknownWorkload:  "unknown-workload",
+	ReasonDomainResolution: "domain-resolution",
+}
+
+// MarshalJSON encodes the name rather than the ordinal.
+func (r Reason) MarshalJSON() ([]byte, error) { return json.Marshal(reasonTokens[r]) }
+
+// UnmarshalJSON accepts the name, so a verdict survives a round trip.
+func (r *Reason) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	for k, v := range reasonTokens {
+		if v == s {
+			*r = k
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown reason %q", s)
 }
 
 // Decision is one half of a verdict.
@@ -203,13 +259,7 @@ func (e *Evaluator) decide(subject, other Endpoint, dir Direction, q Query) Deci
 
 	byLayer := make(map[string]Result, len(eff.Layers))
 	for _, l := range eff.Layers {
-		byLayer[l.Provider] = ResultDenied
-		for _, a := range l.Allows {
-			if peerMatches(a.Peer, other) && portsAllow(a.Ports, q.Protocol, q.Port) {
-				byLayer[l.Provider] = ResultAllowed
-				break
-			}
-		}
+		byLayer[l.Provider] = resultOf(l.Allows, other, q)
 	}
 
 	var via []RuleID
@@ -235,7 +285,7 @@ func (e *Evaluator) decide(subject, other Endpoint, dir Direction, q Query) Deci
 	// this query and a match is a domain name we cannot resolve. Saying DENIED
 	// when the honest answer is "depends on DNS" would be worse than useless in
 	// a security tool.
-	if note, undecidable := e.undecidableAgainst(eff, other, q); undecidable {
+	if note, undecidable := undecidableAgainst(eff.Allows, other, q); undecidable {
 		return Decision{
 			Result:  ResultUndecidable,
 			Reason:  ReasonDomainResolution,
@@ -259,10 +309,27 @@ func (e *Evaluator) decide(subject, other Endpoint, dir Direction, q Query) Deci
 	}
 }
 
+// resultOf answers one allow-set's verdict on a query. It is the same three-way
+// question the combined decision asks, applied to a single provider: a layer
+// that permits egress to 0.0.0.0/0 has not denied a domain, it has failed to
+// resolve it, and reporting that as DENIED would point the blame at a policy
+// that in fact permits everything.
+func resultOf(allows []Allow, other Endpoint, q Query) Result {
+	for _, a := range allows {
+		if peerMatches(a.Peer, other) && portsAllow(a.Ports, q.Protocol, q.Port) {
+			return ResultAllowed
+		}
+	}
+	if _, undecidable := undecidableAgainst(allows, other, q); undecidable {
+		return ResultUndecidable
+	}
+	return ResultDenied
+}
+
 // undecidableAgainst reports whether a domain-versus-address mismatch is the
 // only reason nothing matched.
-func (e *Evaluator) undecidableAgainst(eff Effective, other Endpoint, q Query) (string, bool) {
-	for _, a := range eff.Allows {
+func undecidableAgainst(allows []Allow, other Endpoint, q Query) (string, bool) {
+	for _, a := range allows {
 		if !portsAllow(a.Ports, q.Protocol, q.Port) {
 			continue
 		}

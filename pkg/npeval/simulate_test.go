@@ -1,6 +1,7 @@
 package npeval_test
 
 import (
+	"encoding/json"
 	"net/netip"
 	"strings"
 	"testing"
@@ -341,6 +342,79 @@ func TestSimulateReportsPerLayerResults(t *testing.T) {
 	}
 	if got := v.Egress.ByLayer["aws-anp"]; got != npeval.ResultDenied {
 		t.Errorf("aws-anp layer = %v, want denied", got)
+	}
+}
+
+// A layer that permits egress to the whole internet has not denied a domain,
+// it has failed to resolve it. Reporting DENIED against such a layer points the
+// blame at a policy that in fact permits everything, which is how somebody ends
+// up deleting the wrong one.
+func TestSimulateDoesNotBlameALayerThatCannotResolveTheDomain(t *testing.T) {
+	e := build(t,
+		namespace("prod"),
+		deploy("prod", "api", "app", "api"),
+		netpol("prod", "open-egress", networkingv1.NetworkPolicySpec{
+			PodSelector: *sel("app", "api"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{
+				To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}},
+			}},
+		}),
+		anp("prod", "anp", awsv1alpha1.ApplicationNetworkPolicySpec{
+			PodSelector: *sel("app", "api"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
+				To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{DomainNames: []string{"sts.amazonaws.com"}}},
+			}},
+		}),
+	)
+
+	v, err := e.Simulate(npeval.Query{
+		From: workloadEP("prod", "api"), To: npeval.Endpoint{Domain: "sts.amazonaws.com"},
+		Protocol: npeval.ProtocolTCP, Port: 443,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.Egress.ByLayer["aws-anp"]; got != npeval.ResultAllowed {
+		t.Errorf("aws-anp layer = %v, want allowed: it names the domain", got)
+	}
+	if got := v.Egress.ByLayer["k8s"]; got != npeval.ResultUndecidable {
+		t.Errorf("k8s layer = %v, want undecidable: 0.0.0.0/0 may or may not cover it", got)
+	}
+}
+
+// The ordinals are an implementation detail; a client reading "result": 2 and
+// having to know that denied is declared third is a contract nobody can keep.
+func TestVerdictEncodesResultsByName(t *testing.T) {
+	e := build(t, namespace("prod"), deploy("prod", "api", "app", "api"),
+		deploy("prod", "db", "app", "db"))
+	v, err := e.Simulate(npeval.Query{
+		From: workloadEP("prod", "api"), To: workloadEP("prod", "db"),
+		Protocol: npeval.ProtocolTCP, Port: 5432,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"result":"allowed"`) {
+		t.Errorf("verdict JSON did not name its result: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"reason":"not-isolated"`) {
+		t.Errorf("verdict JSON did not name its reason: %s", raw)
+	}
+
+	var back npeval.Verdict
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("verdict does not survive a round trip: %v", err)
+	}
+	if back.Egress.Result != v.Egress.Result || back.Egress.Reason != v.Egress.Reason {
+		t.Errorf("round trip = %v/%v, want %v/%v",
+			back.Egress.Result, back.Egress.Reason, v.Egress.Result, v.Egress.Reason)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { Boxes, Globe, Layers, Network } from 'lucide-react'
+import { Boxes, Globe, Layers, Network, Route } from 'lucide-react'
 import { useMemo } from 'react'
 
 import type { GraphNode, NamespaceSummary } from '../api'
@@ -19,6 +19,7 @@ interface Props {
   namespaces: NamespaceSummary[]
   onSelectNode: (node: GraphNode) => void
   onSelectNamespace: (name: string) => void
+  onSimulate: () => void
 }
 
 const ICONS = {
@@ -41,6 +42,7 @@ export function CommandPalette({
   namespaces,
   onSelectNode,
   onSelectNamespace,
+  onSimulate,
 }: Props) {
   const workloads = useMemo(() => nodes.filter((n) => n.kind !== 'namespace').slice(0, 300), [nodes])
 
@@ -49,6 +51,20 @@ export function CommandPalette({
       <CommandInput placeholder="Search workloads, namespaces and peers…" />
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
+
+        <CommandGroup heading="Actions">
+          <CommandItem
+            value="simulate connection reachability can a reach b"
+            onSelect={() => {
+              onOpenChange(false)
+              onSimulate()
+            }}
+          >
+            <Route />
+            <span className="flex-1 truncate">Simulate a connection</span>
+            <span className="text-[11px] text-faint">would this be allowed?</span>
+          </CommandItem>
+        </CommandGroup>
 
         <CommandGroup heading="Namespaces">
           {namespaces.map((ns) => (

@@ -133,6 +133,27 @@ export const workloadDetail = {
   },
 }
 
+/** A denied connection whose two halves disagree — the case the panel exists
+ * for. The source may not leave; the destination would have accepted. */
+export const verdict = {
+  allowed: false,
+  undecidable: false,
+  egress: {
+    result: 'denied',
+    reason: 'no-matching-rule',
+    explain:
+      'apps/Deployment/edge/web is egress-isolated by networking.k8s.io/NetworkPolicy/edge/web-egress and no rule allows apps/Deployment/prod/api on 8080/TCP',
+    byLayer: { k8s: 'denied', 'aws-anp': 'undecidable' },
+  },
+  ingress: {
+    result: 'allowed',
+    reason: 'matched-rule',
+    via: ['networking.k8s.io/NetworkPolicy/prod/api-ingress#ingress[0]'],
+    explain: 'apps/Deployment/prod/api ingress to apps/Deployment/edge/web on 8080/TCP is allowed',
+  },
+  summary: 'DENIED: apps/Deployment/edge/web → apps/Deployment/prod/api on 8080/TCP',
+}
+
 /** Serves the fixture cluster and lets the websocket fail, which is a state the
  * UI must survive: it falls back to the HTTP fetch and reports "offline". */
 export async function mockApi(page: Page) {
@@ -140,4 +161,5 @@ export async function mockApi(page: Page) {
   await page.route('**/api/namespaces', (r) => r.fulfill({ json: namespaces }))
   await page.route('**/api/graph*', (r) => r.fulfill({ json: { revision: 3, graph } }))
   await page.route('**/api/workloads/**', (r) => r.fulfill({ json: workloadDetail }))
+  await page.route('**/api/simulate', (r) => r.fulfill({ json: verdict }))
 }

@@ -20,6 +20,7 @@ import { FilterRail } from './components/FilterRail'
 import { GraphCanvas } from './components/GraphCanvas'
 import { Inspector } from './components/Inspector'
 import { Legend } from './components/Legend'
+import { SimulatePanel, type Prefill } from './components/SimulatePanel'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
 import { buildNamespacePalette } from './graph/style'
@@ -91,6 +92,7 @@ export default function App() {
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [simulateOpen, setSimulateOpen] = useState(false)
 
   const query = useMemo(
     () => ({ level, namespaces: selectedNs, includeDefault }),
@@ -161,6 +163,10 @@ export default function App() {
         e.preventDefault()
         setPaletteOpen(true)
       }
+      if (e.key === 's' && !typing && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setSimulateOpen(true)
+      }
       if (e.key === 'Escape' && !typing) {
         setSelectedNode(null)
         setSelectedEdge(null)
@@ -194,6 +200,32 @@ export default function App() {
     setSelectedEdge(null)
   }, [])
 
+  // Whatever is selected has already framed the question, so the panel opens
+  // with it filled in. An edge frames it completely: both ends and a port.
+  const prefill = useMemo<Prefill | undefined>(() => {
+    const endpointFor = (n: GraphNode | undefined) => {
+      if (!n) return undefined
+      if (n.kind === 'workload') {
+        return {
+          text: `${n.namespace}/${n.label}`,
+          workload: { namespace: n.namespace ?? '', name: n.label, kind: n.workloadKind },
+        }
+      }
+      return n.kind === 'domain' ? { text: n.label } : undefined
+    }
+
+    if (selectedEdge) {
+      const port = selectedEdge.ports?.[0]?.match(/^(\d+)/)?.[1]
+      return {
+        from: endpointFor(nodesById.get(selectedEdge.source)),
+        to: endpointFor(nodesById.get(selectedEdge.target)),
+        port: port ? Number(port) : undefined,
+      }
+    }
+    if (selectedNode) return { from: endpointFor(selectedNode) }
+    return undefined
+  }, [selectedEdge, selectedNode, nodesById])
+
   const totalUnprotected = namespaces.reduce((sum, ns) => sum + ns.unprotected, 0)
   const empty = !syncing && !error && filtered && filtered.nodes.length === 0
 
@@ -211,6 +243,7 @@ export default function App() {
             setTheme(next)
           }}
           onOpenSearch={() => setPaletteOpen(true)}
+          onOpenSimulate={() => setSimulateOpen(true)}
         />
 
         <div className="flex min-h-0 flex-1">
@@ -323,6 +356,12 @@ export default function App() {
           </main>
         </div>
 
+        <SimulatePanel
+          open={simulateOpen}
+          onOpenChange={setSimulateOpen}
+          prefill={prefill}
+        />
+
         <CommandPalette
           open={paletteOpen}
           onOpenChange={setPaletteOpen}
@@ -330,6 +369,7 @@ export default function App() {
           namespaces={namespaces}
           onSelectNode={focusNode}
           onSelectNamespace={toggleNamespace}
+          onSimulate={() => setSimulateOpen(true)}
         />
       </div>
     </TooltipProvider>

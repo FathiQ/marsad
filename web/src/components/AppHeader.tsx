@@ -1,4 +1,4 @@
-import { Moon, Search, Sun, Wifi, WifiOff } from 'lucide-react'
+import { Moon, Route, Search, Sun, Wifi, WifiOff } from 'lucide-react'
 
 import type { Capability, Meta } from '../api'
 import { Mark } from './Mark'
@@ -15,6 +15,7 @@ interface Props {
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   onOpenSearch: () => void
+  onOpenSimulate: () => void
 }
 
 function Stat({ value, label, tone }: { value: number; label: string; tone?: 'danger' }) {
@@ -52,6 +53,7 @@ export function AppHeader({
   theme,
   onToggleTheme,
   onOpenSearch,
+  onOpenSimulate,
 }: Props) {
   const unavailable = meta?.capabilities.policies.filter((p) => !p.available) ?? []
 
@@ -79,6 +81,12 @@ export function AppHeader({
         <Search className="size-3.5" />
         <span className="hidden text-[12.5px] sm:inline">Search</span>
         <Kbd className="ml-1">/</Kbd>
+      </Button>
+
+      <Button variant="outline" size="md" onClick={onOpenSimulate}>
+        <Route />
+        <span className="hidden text-[12.5px] sm:inline">Simulate</span>
+        <Kbd className="ml-1">s</Kbd>
       </Button>
 
       {meta && (

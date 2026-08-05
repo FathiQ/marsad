@@ -153,6 +153,58 @@ export interface WorkloadDetail {
   egress: Effective
 }
 
+/** One half of a simulation: what the source's egress says, or what the
+ * destination's ingress says. `not-applicable` means the endpoint is not a
+ * workload, so no policy of that direction governs it. */
+export type SimResult = 'not-applicable' | 'allowed' | 'denied' | 'undecidable'
+
+export type SimReason =
+  | ''
+  | 'not-isolated'
+  | 'matched-rule'
+  | 'no-matching-rule'
+  | 'no-policy-selects'
+  | 'unknown-workload'
+  | 'domain-resolution'
+
+export interface Decision {
+  result: SimResult
+  reason: SimReason
+  via?: string[]
+  explain: string
+  /** Each provider's own answer. With the layers combined by intersection, a
+   * connection can be refused by one provider while another permits it, and
+   * knowing which is what makes the denial actionable. */
+  byLayer?: Record<string, SimResult>
+}
+
+/** A connection needs the source's egress and the destination's ingress to both
+ * permit it. Both halves are always reported, because checking only one is the
+ * usual way reading policy by hand goes wrong. */
+export interface Verdict {
+  allowed: boolean
+  undecidable: boolean
+  egress: Decision
+  ingress: Decision
+  summary: string
+}
+
+/** Exactly one of these identifies an endpoint. */
+export interface SimEndpoint {
+  namespace?: string
+  name?: string
+  kind?: string
+  cidr?: string
+  domain?: string
+}
+
+export interface SimQuery {
+  from: SimEndpoint
+  to: SimEndpoint
+  protocol: string
+  port: number
+}
+
 /** Thrown for a 503, which means the informer caches have not synced yet. It is
  * a normal, brief startup condition and the UI shows a skeleton for it. */
 export class NotReadyError extends Error {}
@@ -185,6 +237,26 @@ export function graphParams(q: GraphQuery): string {
 
 export async function fetchGraph(q: GraphQuery): Promise<{ revision: number; graph: Graph }> {
   return get<{ revision: number; graph: Graph }>(`/api/graph?${graphParams(q)}`)
+}
+
+/**
+ * Asks whether a connection would be permitted by declared policy.
+ *
+ * POST only because the query is a structured object — it reads the in-memory
+ * snapshot and changes nothing, in a tool with no write path at all.
+ */
+export async function simulate(q: SimQuery): Promise<Verdict> {
+  const res = await fetch('/api/simulate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(q),
+  })
+  if (res.status === 503) throw new NotReadyError('cluster state is still syncing')
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(body?.error ?? `${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Verdict
 }
 
 export function fetchWorkload(namespace: string, name: string, kind?: string) {

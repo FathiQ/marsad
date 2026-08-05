@@ -205,3 +205,50 @@ test('reports the websocket being down rather than looking live', async ({ page 
   // "offline" instead of implying the graph is still updating.
   await expect(page.getByText('offline')).toBeVisible({ timeout: 10_000 })
 })
+
+test('simulate reports both halves, not just the answer', async ({ page }) => {
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  // The legend once opened 684px above the viewport and still passed
+  // toBeVisible, so assert the dialog is actually inside the window.
+  const box = await dialog.boundingBox()
+  const size = page.viewportSize()
+  expect(box).not.toBeNull()
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(size!.height + 1)
+
+  await dialog.locator('#sim-from').fill('edge/web')
+  await dialog.locator('#sim-to').fill('prod/api')
+  await dialog.locator('#sim-port').fill('8080')
+  await dialog.getByRole('button', { name: 'Check' }).click()
+
+  await expect(dialog.getByText('Denied', { exact: true })).toBeVisible()
+
+  // Both directions are reported even though egress alone settles it: the fix
+  // for each lives in a different policy, in a different namespace. The headings
+  // are uppercased by CSS, so match the text that is actually in the DOM.
+  const egress = dialog.locator('section', { hasText: /may the source leave/i })
+  const ingress = dialog.locator('section', { hasText: /will the destination accept/i })
+  await expect(egress).toBeVisible()
+  await expect(ingress).toBeVisible()
+  await expect(egress.getByText('denied', { exact: true })).toBeVisible()
+  await expect(ingress.getByText('allowed', { exact: true })).toBeVisible()
+
+  // A layer that cannot resolve a domain has not denied it, and the panel must
+  // not report it as though it had.
+  await expect(dialog.getByText('aws-anp · undecidable')).toBeVisible()
+})
+
+test('a free-text destination says how it was read', async ({ page }) => {
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog')
+
+  await dialog.locator('#sim-to').fill('sts.amazonaws.com')
+  await expect(dialog.getByText('read as a domain')).toBeVisible()
+
+  await dialog.locator('#sim-to').fill('10.0.0.1/32')
+  await expect(dialog.getByText('read as a address')).toBeVisible()
+})
