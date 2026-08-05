@@ -61,6 +61,17 @@ export const graph = {
       replicas: 2,
       isolation: { ingress: false, egress: true },
     },
+    {
+      // Sorts last in the picker despite leading alphabetically: kube- is
+      // reserved for Kubernetes' own namespaces and is rarely what is meant.
+      id: 'wl:kube-system/DaemonSet/kube-proxy',
+      kind: 'workload',
+      label: 'kube-proxy',
+      namespace: 'kube-system',
+      workloadKind: 'DaemonSet',
+      replicas: 1,
+      isolation: { ingress: false, egress: false },
+    },
     { id: 'domain:*.s3.amazonaws.com', kind: 'domain', label: '*.s3.amazonaws.com' },
     { id: 'any:all', kind: 'any', label: 'any' },
   ],

@@ -252,3 +252,48 @@ test('a free-text destination says how it was read', async ({ page }) => {
   await dialog.locator('#sim-to').fill('10.0.0.1/32')
   await expect(dialog.getByText('read as a address')).toBeVisible()
 })
+
+test('the suggestion list is reachable, navigable and sensibly ordered', async ({ page }) => {
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('#sim-from').click()
+
+  const list = dialog.getByRole('listbox').first()
+  await expect(list).toBeVisible()
+
+  // The list used to sit inside the dialog's own scroll container, which cut it
+  // off and left the lower options unreachable. toBeVisible does not catch
+  // clipping, so hit-test the bottom edge for real.
+  const box = await list.boundingBox()
+  expect(box).not.toBeNull()
+  const reachable = await page.evaluate(
+    ({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('[role="listbox"]')),
+    { x: box!.x + box!.width / 2, y: box!.y + box!.height - 4 },
+  )
+  expect(reachable).toBe(true)
+
+  // Someone's own workloads come before Kubernetes' own.
+  const first = await list.getByRole('option').first().textContent()
+  expect(first).not.toContain('kube-system')
+
+  // Typing narrows, and the keyboard alone can finish the job.
+  await dialog.locator('#sim-from').fill('web')
+  await dialog.locator('#sim-from').press('ArrowDown')
+  await dialog.locator('#sim-from').press('Enter')
+  await expect(dialog.locator('#sim-from')).toHaveValue('edge/web')
+  await expect(list).toBeHidden()
+})
+
+test('escape dismisses the suggestion list before the dialog', async ({ page }) => {
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('#sim-to').click()
+  await expect(dialog.getByRole('listbox').first()).toBeVisible()
+
+  await dialog.locator('#sim-to').press('Escape')
+  await expect(dialog.getByRole('listbox')).toBeHidden()
+  await expect(dialog).toBeVisible()
+
+  await dialog.locator('#sim-to').press('Escape')
+  await expect(dialog).toBeHidden()
+})
