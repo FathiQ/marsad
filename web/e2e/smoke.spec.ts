@@ -249,8 +249,14 @@ test('a free-text destination says how it was read', async ({ page }) => {
   await dialog.locator('#sim-to').fill('sts.amazonaws.com')
   await expect(dialog.getByText('read as a domain')).toBeVisible()
 
+  // The hint used to float over the end of the field, hiding exactly the part
+  // of a long domain worth reading. It belongs beside the label.
+  const field = await dialog.locator('#sim-to').boundingBox()
+  const hint = await dialog.getByText('read as a domain').boundingBox()
+  expect(hint!.y + hint!.height).toBeLessThanOrEqual(field!.y + 1)
+
   await dialog.locator('#sim-to').fill('10.0.0.1/32')
-  await expect(dialog.getByText('read as a address')).toBeVisible()
+  await expect(dialog.getByText('read as an address')).toBeVisible()
 })
 
 test('the suggestion list is reachable, navigable and sensibly ordered', async ({ page }) => {

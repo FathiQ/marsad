@@ -159,9 +159,19 @@ function EndpointField({
 
   return (
     <div className="relative" ref={box}>
-      <label htmlFor={id} className="mb-1.5 block text-[11px] font-medium text-faint">
-        {label}
-      </label>
+      {/* The hint shares the label's row rather than sitting over the field.
+          Floated inside the input it covered the end of anything long, which is
+          exactly when a domain most needs reading. */}
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <label htmlFor={id} className="text-[11px] font-medium text-faint">
+          {label}
+        </label>
+        {resolved && !value.workload && (
+          <span className="truncate text-[10.5px] text-faint">
+            read as {/^[aeiou]/.test(resolved.label) ? 'an' : 'a'} {resolved.label}
+          </span>
+        )}
+      </div>
       <input
         id={id}
         role="combobox"
@@ -204,12 +214,6 @@ function EndpointField({
           'outline-none placeholder:text-faint focus:border-accent/60',
         )}
       />
-      {resolved && !value.workload && (
-        <span className="absolute top-[30px] right-2.5 text-[10.5px] text-faint">
-          read as a {resolved.label}
-        </span>
-      )}
-
       {openList && options.length > 0 && (
         <ul
           id={`${id}-list`}
