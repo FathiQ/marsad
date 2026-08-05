@@ -53,9 +53,11 @@ self.onmessage = (event: MessageEvent<LayoutRequest>) => {
       // Honour node size so big namespace nodes do not swallow their neighbours.
       adjustSizes: true,
       barnesHutOptimize: graph.order > 200,
-      gravity: 1.2,
-      scalingRatio: 24,
-      slowDown: 4,
+      // Gravity and scaling are scaled to the graph's size. A fixed spread that
+      // suits a thousand nodes flings a handful of them into the corners.
+      gravity: graph.order < 40 ? 3.5 : 1.4,
+      scalingRatio: graph.order < 40 ? 7 : 20,
+      slowDown: 3,
     },
   })
 

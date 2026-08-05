@@ -345,6 +345,31 @@ func TestBroadPeersCollapseAndSaySo(t *testing.T) {
 	}
 }
 
+// Seeding a node for every namespace at workload level leaves a scatter of
+// empty namespace nodes beside the workloads they contain.
+func TestWorkloadLevelOmitsUnusedNamespaceNodes(t *testing.T) {
+	e := build(t,
+		npeval.Namespace{Name: "prod"},
+		npeval.Namespace{Name: "empty"},
+		npeval.Namespace{Name: "unrelated"},
+		deploy("prod", "api", "app", "api"),
+	)
+
+	g := graph.Build(e, graph.Options{Level: graph.LevelWorkload, IncludeDefault: false})
+	for _, id := range nodeIDs(g) {
+		if strings.HasPrefix(id, "ns:") {
+			t.Errorf("workload level should not seed namespace nodes, found %s", id)
+		}
+	}
+
+	// The namespace-level view still shows an empty namespace, because there it
+	// is the unit being drawn.
+	ns := graph.Build(e, graph.Options{Level: graph.LevelNamespace, IncludeDefault: false})
+	if !slices.Contains(nodeIDs(ns), "ns:empty") {
+		t.Errorf("namespace level should show empty namespaces, got %v", nodeIDs(ns))
+	}
+}
+
 func TestScopeFiltersNamespaces(t *testing.T) {
 	e := build(t,
 		npeval.Namespace{Name: "prod"},

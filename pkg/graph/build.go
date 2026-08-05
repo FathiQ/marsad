@@ -44,9 +44,16 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 	}
 
 	snap := e.Snapshot()
-	for _, ns := range snap.Namespaces() {
-		if b.inScope(ns.Name) {
-			b.namespaceNode(ns.Name)
+
+	// Namespace nodes are seeded only for the namespace-level view, where an
+	// empty namespace is still worth showing. At workload level they are created
+	// on demand for collapsed peers; seeding them all leaves a scatter of
+	// disconnected namespace nodes floating beside the workloads they contain.
+	if opts.Level == LevelNamespace {
+		for _, ns := range snap.Namespaces() {
+			if b.inScope(ns.Name) {
+				b.namespaceNode(ns.Name)
+			}
 		}
 	}
 

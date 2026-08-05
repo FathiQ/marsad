@@ -14,29 +14,48 @@ import {
   type NamespaceSummary,
 } from './api'
 import { GraphView } from './graph/GraphView'
+import { buildNamespacePalette } from './graph/style'
 import { DetailDrawer } from './panels/DetailDrawer'
 import { Legend } from './panels/Legend'
 import { Sidebar } from './panels/Sidebar'
 
-/** Observatory dome. Kept to a single small mark — the graph is the thing worth
- * looking at, not the branding. */
+/** An observatory dome with the shutter open. One small mark — the graph is the
+ * thing worth looking at, not the branding. */
 function Mark() {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M3 20h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 20.5h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" stroke="currentColor" strokeWidth="1.5" />
       <path
-        d="M5 20a7 7 0 0 1 14 0"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
+        d="M9.6 6.2a7.5 7.5 0 0 1 4.8 0l-1.1 7.1h-2.6L9.6 6.2Z"
+        fill="var(--accent)"
+        fillOpacity="0.18"
+        stroke="var(--accent)"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
       />
-      <path d="M12 13V4" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round" />
-      <circle cx="12" cy="3.2" r="1.6" fill="var(--accent)" />
+      <circle cx="12" cy="3.4" r="1.7" fill="var(--accent)" />
     </svg>
   )
 }
 
 type Theme = 'dark' | 'light'
+
+/**
+ * Applied synchronously rather than from an effect.
+ *
+ * React runs child effects before parent ones, so the canvas would read the CSS
+ * variables for the *previous* theme and paint its labels in it — invisible text
+ * on a matching background. Setting the attribute outside the effect ordering
+ * removes the race rather than working around it.
+ */
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme
+  localStorage.setItem('marsad.theme', theme)
+}
+
+const initialTheme: Theme = (localStorage.getItem('marsad.theme') as Theme | null) ?? 'dark'
+applyTheme(initialTheme)
 
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -50,18 +69,11 @@ export default function App() {
   const [selectedNs, setSelectedNs] = useState<string[]>([])
   const [includeDefault, setIncludeDefault] = useState(true)
 
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem('marsad.theme') as Theme | null) ?? 'dark',
-  )
+  const [theme, setTheme] = useState<Theme>(initialTheme)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem('marsad.theme', theme)
-  }, [theme])
 
   const query = useMemo(
     () => ({ level, namespaces: selectedNs, includeDefault }),
@@ -145,6 +157,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Built from the full namespace list rather than from the nodes on screen, so
+  // filtering the graph does not repaint everything a different colour.
+  const palette = useMemo(
+    () => buildNamespacePalette(namespaces.map((ns) => ns.name)),
+    [namespaces],
+  )
+
   const nodesById = useMemo(
     () => new Map((graph?.nodes ?? []).map((n) => [n.id, n])),
     [graph],
@@ -170,14 +189,14 @@ export default function App() {
       <header className="header">
         <div className="brand">
           <Mark />
-          Marsad
+          <span className="name">Marsad</span>
           <span className="tag">the observatory for your Kubernetes network policies</span>
         </div>
 
         <div className="spacer" />
 
         {meta && (
-          <>
+          <div className="stats">
             <span className="stat">
               <b>{meta.counts.namespaces}</b> namespaces
             </span>
@@ -192,11 +211,11 @@ export default function App() {
                 <b>{totalUnprotected}</b> unprotected
               </span>
             )}
-          </>
+          </div>
         )}
 
         {unavailable.map((c) => (
-          <span className="pill off" key={c.provider} title={c.reason}>
+          <span className="pill off muted" key={c.provider} title={c.reason}>
             <span className="dot" />
             {c.provider === 'aws-anp' ? 'domain policies unavailable' : `${c.provider} unavailable`}
           </span>
@@ -209,7 +228,11 @@ export default function App() {
 
         <button
           className="icon-btn"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          onClick={() => {
+            const next = theme === 'dark' ? 'light' : 'dark'
+            applyTheme(next)
+            setTheme(next)
+          }}
           aria-label="Toggle theme"
         >
           {theme === 'dark' ? '☾' : '☀'}
@@ -229,12 +252,14 @@ export default function App() {
           nodes={graph?.nodes ?? []}
           onFocusNode={focusNode}
           searchRef={searchRef}
+          palette={palette}
         />
 
         <div className="canvas-wrap">
           {graph && (
             <GraphView
               data={graph}
+              palette={palette}
               theme={theme}
               selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
               focusId={focusId}
@@ -261,7 +286,7 @@ export default function App() {
           )}
 
           {graph?.truncated && (
-            <div className="banner">
+            <div className="banner glass">
               Some peers matched more workloads than can be drawn individually and were collapsed to
               their namespace.
             </div>

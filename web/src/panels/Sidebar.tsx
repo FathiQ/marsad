@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 
 import type { GraphNode, Level, NamespaceSummary } from '../api'
+import { namespaceSwatch, type NamespacePalette } from '../graph/style'
 
 interface Props {
   namespaces: NamespaceSummary[]
@@ -15,6 +16,7 @@ interface Props {
   nodes: GraphNode[]
   onFocusNode: (node: GraphNode) => void
   searchRef: React.RefObject<HTMLInputElement>
+  palette: NamespacePalette
 }
 
 /** Subsequence match, so "kbsys" finds "kube-system" the way a fuzzy finder
@@ -43,6 +45,7 @@ export function Sidebar({
   nodes,
   onFocusNode,
   searchRef,
+  palette,
 }: Props) {
   const [query, setQuery] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -59,7 +62,11 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div>
+      <div className="search-wrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+        </svg>
         <input
           ref={searchRef}
           className="search"
@@ -80,9 +87,13 @@ export function Sidebar({
       {matches.length > 0 && (
         <div>
           <h3 className="panel-title">Jump to</h3>
-          <div className="ns-list">
+          <div className="card">
             {matches.slice(0, 8).map((n) => (
               <button key={n.id} className="ns-row" onClick={() => onFocusNode(n)}>
+                <span
+                  className="swatch"
+                  style={{ background: namespaceSwatch(palette, n.namespace ?? n.label) }}
+                />
                 <span className="name">{n.label}</span>
                 <span className="count">{n.namespace ?? n.kind}</span>
               </button>
@@ -114,26 +125,21 @@ export function Sidebar({
         Show allowed-by-default
       </label>
 
-      <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div>
         <h3 className="panel-title">
-          Namespaces
-          {selected.length > 0 && (
-            <button
-              onClick={onClear}
-              style={{ float: 'right', fontSize: 11, color: 'var(--accent)', padding: 0 }}
-            >
-              clear ({selected.length})
-            </button>
-          )}
+          <span>Namespaces</span>
+          {selected.length > 0 && <button onClick={onClear}>clear ({selected.length})</button>}
         </h3>
-        <div className="ns-list" ref={listRef} style={{ flex: 1, minHeight: 120 }}>
+        {/* Sized to its contents rather than stretched: a flexed card clipped
+            the last namespace against the sidebar's own scroll. */}
+        <div className="card" ref={listRef}>
           {shown.length === 0 ? (
             <div style={{ padding: 10, color: 'var(--text-faint)', fontSize: 12 }}>
               No namespace matches.
             </div>
           ) : (
             <Virtuoso
-              style={{ height: Math.min(shown.length * 31, 340) }}
+              style={{ height: Math.min(shown.length * 32, 420) }}
               data={shown}
               itemContent={(_, ns) => (
                 <button
@@ -141,6 +147,12 @@ export function Sidebar({
                   onClick={() => onToggle(ns.name)}
                   title={`${ns.workloads} workloads, ${ns.policies} policies, ${ns.unprotected} unprotected`}
                 >
+                  {/* The same hue the graph gives this namespace, so the filter
+                      and the canvas agree at a glance. */}
+                  <span
+                    className="swatch"
+                    style={{ background: namespaceSwatch(palette, ns.name) }}
+                  />
                   <span className="name">{ns.name}</span>
                   <span className={`count ${ns.unprotected > 0 ? 'bad' : ''}`}>
                     {ns.unprotected > 0 ? `${ns.unprotected}/${ns.workloads}` : ns.workloads}
