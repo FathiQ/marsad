@@ -1,11 +1,49 @@
+# Build output
 bin/
 dist/
-node_modules/
-*.out
-.DS_Store
 web/dist/
-.kube-kind.yaml
+node_modules/
+*.tsbuildinfo
+
+# Byproducts of docs/brand/trace.py. The shipped favicons live in web/public
+# and are drawn with a heavier groove than the app mark, so the ones trace.py
+# emits alongside the marks are intermediates, not assets.
+docs/brand/favicon.svg
+docs/brand/parts.json
+
+# Test and coverage output
+*.out
 web/test-results/
 web/playwright-report/
 web/.playwright/
 web/shot-*.png
+
+# Credentials and cluster access. Nothing matched here is ever safe to commit:
+# a kubeconfig carries a bearer token or an exec plugin pointing at your cloud
+# identity, and Marsad is a tool people run against production clusters.
+.env
+.env.*
+!.env.example
+kubeconfig
+*.kubeconfig
+.kube/
+.kube-kind.yaml
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+credentials
+.aws/
+*.tfvars
+
+# Editor and OS noise
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
