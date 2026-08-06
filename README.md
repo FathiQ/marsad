@@ -19,6 +19,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/graph-workload.png" alt="Marsad's workload graph: namespaces drawn as containers, workloads as cards with their open ports listed on the card that accepts them, and edges out to AWS domain peers on 443" width="100%">
+</p>
+
 Marsad (مرصد, *"observatory"*) is a read-only web dashboard that shows what your
 cluster's network security posture actually *is*, according to the policies you
 have declared. It renders an interactive graph of your workloads and the ingress
@@ -59,6 +63,29 @@ it draws, it can point at the exact rule that produced it.
 - **Honest uncertainty.** Some questions — does `*.s3.amazonaws.com` cover this
   IP? — need DNS resolution Marsad does not observe. Those are marked
   `Approximate` or `Undecidable` with the reason, never collapsed into a yes.
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/screenshots/graph-namespace.png" alt="The namespace-level view, aggregating each namespace into a single card">
+<p align="center"><em>Namespace level, for a cluster you have not seen before</em></p>
+</td>
+<td width="50%">
+<img src="docs/screenshots/simulate.png" alt="The simulate panel answering whether one workload may reach another on a given port, with separate egress and ingress verdicts">
+<p align="center"><em>Simulate: both halves, because checking one is how it goes wrong</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/screenshots/inspector.png" alt="The inspector panel showing a namespace's workload and unprotected counts">
+<p align="center"><em>Select anything to see what applies to it</em></p>
+</td>
+<td width="50%">
+<img src="docs/screenshots/search.png" alt="The command palette searching workloads, namespaces and peers, with unprotected counts beside each namespace">
+<p align="center"><em>⌘K for workloads, namespaces and peers</em></p>
+</td>
+</tr>
+</table>
 
 ## Quick start
 
