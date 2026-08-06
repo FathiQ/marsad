@@ -77,3 +77,28 @@ jobs:
           cache: true
       # A stale go.mod breaks reproducible builds for everyone downstream.
       - run: go mod tidy && git diff --exit-code go.mod go.sum
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/marsad
+      # Render with the defaults and with the awkward combinations, so a
+      # template that only breaks when a block is switched off fails here
+      # rather than on someone's cluster.
+      - run: helm template marsad charts/marsad > /dev/null
+      - run: helm template marsad charts/marsad --set rbac.create=false --set serviceAccount.create=false > /dev/null
+      - run: helm template marsad charts/marsad --set fullnameOverride=obs --set service.type=NodePort > /dev/null
+      # The chart must stay read-only. Any verb outside get/list/watch in the
+      # rendered ClusterRole is a bug in the chart, whatever the values say.
+      - name: The ClusterRole grants reads only
+        run: |
+          verbs=$(helm template marsad charts/marsad \
+            | awk '/kind: ClusterRole$/,/^---/' \
+            | grep -oE 'verbs: \[[^]]*\]' | sort -u)
+          echo "$verbs"
+          if [ "$verbs" != "verbs: [get, list, watch]" ]; then
+            echo "::error::the chart's ClusterRole grants something other than get/list/watch"
+            exit 1
+          fi

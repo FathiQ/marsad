@@ -65,13 +65,24 @@ it draws, it can point at the exact rule that produced it.
 Marsad needs read access to a cluster and nothing else.
 
 ```sh
-kubectl apply -f deploy/
+helm install marsad oci://ghcr.io/fathiq/charts/marsad \
+  --namespace marsad --create-namespace
+
 kubectl -n marsad port-forward svc/marsad 8080:80
 open http://localhost:8080
 ```
 
-Published images are on GitHub Container Registry, for `linux/amd64` and
-`linux/arm64`:
+The chart is an OCI artifact, so there is no `helm repo add` step. Helm 3.8 or
+newer. See [charts/marsad](charts/marsad) for the values it takes and
+`helm uninstall marsad -n marsad` to remove it.
+
+Plain manifests work too, if you would rather not use Helm:
+
+```sh
+kubectl apply -f deploy/
+```
+
+Images are on GitHub Container Registry for `linux/amd64` and `linux/arm64`:
 
 ```sh
 docker pull ghcr.io/fathiq/marsad:latest
@@ -79,7 +90,7 @@ docker pull ghcr.io/fathiq/marsad:latest
 
 There is no Ingress and no authentication in v1, by design: reach it with
 `port-forward`, which reuses the cluster's own authn and authz instead of
-inventing a second, weaker one. `make undeploy` removes everything.
+inventing a second, weaker one.
 
 To try it with policies worth looking at, `make kind-up` builds a local kind
 cluster with the AWS CRD and [`examples/`](examples/) applied.
@@ -152,8 +163,8 @@ See [docs/development.md](docs/development.md) and
 Running and useful. The evaluation core, the informer layer, the API and the
 dashboard are built and tested.
 
-Not yet built: a Helm chart, graph exports, and end-to-end CI against a real
-kind cluster. A findings engine — named rules over the evaluated model, for the
+Not yet built: graph exports, and end-to-end CI against a real kind cluster. A
+findings engine — named rules over the evaluated model, for the
 problems the graph cannot show, such as an overly broad `*.amazonaws.com`
 wildcard or a policy whose selector matches nothing — is designed but
 deliberately not started.

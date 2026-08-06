@@ -1,0 +1,92 @@
+# Default values for Marsad.
+
+image:
+  repository: ghcr.io/fathiq/marsad
+  # Defaults to the chart's appVersion. Pin a digest or a sha- tag if you want
+  # a running pod to be traceable to an exact revision.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# One replica is the right answer, not a placeholder. Each pod holds the whole
+# cluster's policy graph in memory and rebuilds it from its own informers, so a
+# second replica doubles the API watch load and the memory to serve identical,
+# read-only data. Scale the memory limit instead.
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # Defaults to the fullname when create is true.
+  name: ""
+  annotations: {}
+
+rbac:
+  # The ClusterRole and its binding. Set to false only if you provision RBAC
+  # out of band — Marsad cannot read anything without it.
+  #
+  # The verbs are deliberately not configurable. They are get, list and watch,
+  # and that is the second half of Marsad's read-only guarantee: even a
+  # compromised Marsad cannot change anything through the API. A values key that
+  # could widen them would make the promise untrue.
+  create: true
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Marsad's own flags.
+config:
+  # debug, info, warn or error.
+  logLevel: info
+  # How NetworkPolicy and ApplicationNetworkPolicy layers combine: intersect or
+  # union. Intersect is the conservative reading — a connection is shown as
+  # allowed only if both layers permit it — and matches the AWS CRD's own field
+  # documentation. Use union to see what either layer alone would allow.
+  combineMode: intersect
+
+# Appended to the container's args, for flags this chart does not model.
+extraArgs: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    # The whole cluster's policy graph is held in memory. A few thousand
+    # workloads fit comfortably; raise this for very large clusters rather than
+    # letting it OOM-loop. No CPU limit: throttling a graph rebuild makes the
+    # dashboard feel broken, and the workload is bursty by nature.
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+priorityClassName: ""
+
+# There is deliberately no ingress block. Marsad has no authentication in v1,
+# so an Ingress would publish an unauthenticated read of your cluster's entire
+# security posture. Reach it with `kubectl port-forward`, which reuses the
+# cluster's own authn and authz rather than inventing a second, weaker one. If
+# you need shared access, put it behind your own authenticating proxy
+# deliberately, as a decision you have made rather than a default you inherited.

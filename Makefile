@@ -118,6 +118,32 @@ kind-down:
 	kind delete cluster --name '$(KIND_CLUSTER)'
 	rm -f .kube-kind.yaml
 
+HELM := docker run --rm -v '$(CURDIR)':/src -v '$(HOME)/.kube':/root/.kube \
+	-w /src --network host alpine/helm:latest
+
+## helm-lint: lint and render the chart, including the awkward value combinations
+.PHONY: helm-lint
+helm-lint:
+	$(HELM) lint charts/marsad
+	$(HELM) template marsad charts/marsad > /dev/null
+	$(HELM) template marsad charts/marsad --set rbac.create=false --set serviceAccount.create=false > /dev/null
+	@echo "chart ok"
+
+## helm-template: render the chart to stdout (ARGS='--set key=value')
+.PHONY: helm-template
+helm-template:
+	@$(HELM) template marsad charts/marsad $(ARGS)
+
+## helm-kind: install the chart into the local kind cluster from the loaded image
+.PHONY: helm-kind
+helm-kind:
+	$(MAKE) image PLATFORM=linux/$(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+	kind load docker-image '$(IMAGE):$(TAG)' --name '$(KIND_CLUSTER)'
+	$(HELM) upgrade --install marsad charts/marsad \
+		--kube-context 'kind-$(KIND_CLUSTER)' --namespace marsad --create-namespace \
+		--set image.repository='$(IMAGE)' --set image.tag='$(TAG)' \
+		--wait --timeout 120s
+
 ## push: build the amd64 image and push it to $(REGISTRY)
 .PHONY: push
 push: require-registry
