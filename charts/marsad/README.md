@@ -6,7 +6,7 @@ The observatory for your Kubernetes network policies. See the
 ## Install
 
 ```sh
-helm install marsad oci://ghcr.io/fathiq/charts/marsad --version 0.1.0 \
+helm install marsad oci://ghcr.io/fathiq/charts/marsad --version 0.1.1 \
   --namespace marsad --create-namespace
 
 kubectl -n marsad port-forward svc/marsad 8080:80

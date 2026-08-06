@@ -6,8 +6,8 @@ type: application
 # The chart version tracks the application version. Marsad is a single
 # component with no subcharts, so a chart change that is not an app change is
 # rare enough that two independent version lines would cost more than it saves.
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.1.1"
 
 kubeVersion: ">=1.25.0-0"
 
