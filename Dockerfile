@@ -3,7 +3,12 @@
 
 # The frontend builds first and in its own stage. It changes far less often than
 # the Go code, so a backend edit does not reinstall node_modules.
-FROM node:22-bookworm AS web
+#
+# Pinned to $BUILDPLATFORM because the output is JavaScript — identical whatever
+# the target architecture. Without this a multi-arch build runs the whole npm
+# install and Vite build again under QEMU for each extra platform, to produce
+# byte-identical files.
+FROM --platform=$BUILDPLATFORM node:22-bookworm AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund

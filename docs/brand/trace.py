@@ -139,11 +139,15 @@ print(f"breach {Y_A:.2f}  crescent {Y_C:.2f}  path chars {[len(s) for s in shell
 shell_d = " ".join(shells + [base, sky])
 open('parts.json','w').write(json.dumps({'shell': shell_d, 'sky': sky}))
 
-PLAIN = ('<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
+# width/height as well as viewBox. A viewBox alone gives an SVG an aspect ratio
+# but no intrinsic size, and a browser asked to rasterise it inside an <img>
+# renders nothing at all — which is how the mark first appeared blank in the
+# app. Anywhere the file is referenced rather than inlined depends on these.
+PLAIN = ('<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
          '<path fill="{s}" fill-rule="evenodd" d="{d}"/><path fill="{k}" d="{sd}"/></svg>')
-MONO = ('<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
+MONO = ('<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
         '<path fill="{s}" fill-rule="evenodd" d="{d}"/></svg>')
-TILE = ('<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
+TILE = ('<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'
         '<rect width="64" height="64" rx="13" fill="#0F1622"/>'
         '<g transform="translate(32,32.6) scale(0.88) translate(-32.05,-31.6)">'
         '<path fill="#E8EEF7" fill-rule="evenodd" d="{d}"/>'
