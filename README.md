@@ -65,7 +65,7 @@ it draws, it can point at the exact rule that produced it.
 Marsad needs read access to a cluster and nothing else.
 
 ```sh
-helm install marsad oci://ghcr.io/fathiq/charts/marsad \
+helm install marsad oci://ghcr.io/fathiq/charts/marsad --version 0.1.0 \
   --namespace marsad --create-namespace
 
 kubectl -n marsad port-forward svc/marsad 8080:80
