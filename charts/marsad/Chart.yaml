@@ -1,0 +1,31 @@
+apiVersion: v2
+name: marsad
+description: The observatory for your Kubernetes network policies — a read-only dashboard of what your policies actually permit
+type: application
+
+# The chart version tracks the application version. Marsad is a single
+# component with no subcharts, so a chart change that is not an app change is
+# rare enough that two independent version lines would cost more than it saves.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.25.0-0"
+
+home: https://github.com/FathiQ/marsad
+sources:
+  - https://github.com/FathiQ/marsad
+icon: https://raw.githubusercontent.com/FathiQ/marsad/main/docs/brand/mark-512.png
+
+keywords:
+  - networkpolicy
+  - network-policy
+  - security
+  - visualization
+  - observability
+  - eks
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "false"
+  # Every permission the chart grants is a read. See templates/clusterrole.yaml.
+  artifacthub.io/containsSecurityUpdates: "false"

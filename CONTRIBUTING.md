@@ -74,6 +74,11 @@ frontend `tsc`, eslint with `--max-warnings 0`, a production build and the
 Playwright smoke test. All of it reproduces locally through `make` — nothing in
 CI needs a tool you do not already have in a container.
 
+It also lints and renders the Helm chart, and asserts that the ClusterRole the
+chart produces grants nothing but `get`, `list` and `watch`. That check is there
+because the read-only promise is the product, and a chart is the easiest place
+to widen it by accident. `make helm-lint` runs the same thing.
+
 [`build.yml`](.github/workflows/build.yml) decides whether the change is worth
 an **artifact**. It builds the multi-architecture image and publishes it to
 `ghcr.io`, and it is gated on a maintainer approving the pull request rather

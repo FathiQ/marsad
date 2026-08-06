@@ -1,0 +1,33 @@
+Marsad is installed as {{ include "marsad.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+Open the dashboard:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "marsad.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+
+There is no Ingress and no authentication, by design. port-forward reuses the
+cluster's own authn and authz instead of Marsad inventing a second, weaker one.
+
+Marsad reads declared policy, never live traffic, and every call it makes to the
+Kubernetes API is get, list or watch.
+{{- if not .Values.rbac.create }}
+
+WARNING: rbac.create is false. Marsad cannot read anything unless a ClusterRole
+granting get/list/watch on namespaces, pods, services, the apps and batch
+controllers, networkpolicies and applicationnetworkpolicies is bound to the
+service account {{ include "marsad.serviceAccountName" . }} yourself.
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+
+NOTE: replicaCount is {{ .Values.replicaCount }}. Each replica holds the whole
+cluster's policy graph in memory and rebuilds it from its own informers, so the
+extra pods multiply the API watch load to serve identical read-only data. One
+replica with a higher memory limit is almost always the better trade.
+{{- end }}
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+WARNING: service.type is LoadBalancer. Marsad has no authentication, so this
+publishes an unauthenticated read of your cluster's entire security posture to
+whatever the load balancer is reachable from. Put it behind an authenticating
+proxy, or use port-forward instead.
+{{- end }}
