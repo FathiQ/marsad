@@ -62,3 +62,31 @@ Explain *why* in the commit message; the diff already shows what. If you are
 changing evaluation semantics, say which upstream documentation or CRD schema
 supports the change — that is the standard the existing code is held to, and
 several comments cite the exact sentence they encode.
+
+## What CI does with your pull request
+
+Two workflows run, and they answer different questions.
+
+[`ci.yml`](.github/workflows/ci.yml) decides whether the change is **correct**.
+It runs on every push to the branch: `go build`, `go test -race`,
+golangci-lint, govulncheck, `go mod tidy` with a dirty-tree check, and for the
+frontend `tsc`, eslint with `--max-warnings 0`, a production build and the
+Playwright smoke test. All of it reproduces locally through `make` — nothing in
+CI needs a tool you do not already have in a container.
+
+[`build.yml`](.github/workflows/build.yml) decides whether the change is worth
+an **artifact**. It builds the multi-architecture image and publishes it to
+`ghcr.io`, and it is gated on a maintainer approving the pull request rather
+than on any push. Approving a change publishes `pr-<number>`; merging to `main`
+publishes `main` and a `sha-` tag; a `v*` tag publishes the semver tags and
+moves `latest`.
+
+Two consequences worth knowing:
+
+- **A pull request from a fork builds but never publishes.** The token in that
+  event context can write packages, and an approval is a judgement about code,
+  not a grant of push rights to the registry.
+- **The build does not re-run the tests.** Keeping the two concerns separate
+  relies on the `ci.yml` checks being required in branch protection; that
+  setting, not this workflow, is what stops an approval from publishing an
+  image whose tests are red.
