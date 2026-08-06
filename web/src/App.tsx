@@ -183,6 +183,29 @@ export default function App() {
   )
 
   const filtered = useMemo(() => (graph ? applyFilters(graph, filters) : null), [graph, filters])
+
+  /**
+   * Everything that means "show me something else", and nothing that means "the
+   * cluster changed".
+   *
+   * The canvas cannot tell those apart — both arrive as a new graph — and the
+   * difference decides whether reframing is helpful or is the camera wandering
+   * off on its own. Only this component knows which of the two happened.
+   */
+  const viewToken = useMemo(
+    () =>
+      [
+        level,
+        includeDefault,
+        selectedNs.join(','),
+        filters.onlyUnprotected,
+        filters.hideIsolatedNodes,
+        filters.hideDNS,
+        [...filters.workloadKinds].sort().join(','),
+        [...filters.edgeKinds].sort().join(','),
+      ].join('|'),
+    [level, includeDefault, selectedNs, filters],
+  )
   const hidden = graph && filtered ? hiddenCount(graph, filtered) : 0
   const workloadKinds = useMemo(() => presentWorkloadKinds(graph), [graph])
 
@@ -296,6 +319,7 @@ export default function App() {
                 showGroups={showGroups}
                 selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
                 focusId={focusId}
+                viewToken={viewToken}
                 onSelectNode={(n) => {
                   setSelectedNode(n)
                   setSelectedEdge(null)

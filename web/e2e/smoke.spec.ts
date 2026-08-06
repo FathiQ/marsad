@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { graph, mockApi } from './fixtures'
 
@@ -304,70 +304,134 @@ test('escape dismisses the suggestion list before the dialog', async ({ page }) 
   await expect(dialog).toBeHidden()
 })
 
+
+/**
+ * The bounding box of everything the overlay actually painted.
+ *
+ * Camera and layout bugs are invisible to assertions about nodes: a graph
+ * collapsed into a column of dots, and a camera that had wandered off, both
+ * satisfied every `toBeVisible` in this file. What is painted, and where, is
+ * the thing that was wrong, so it is the thing to measure.
+ */
+async function paintedBox(page: Page) {
+  return await page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('canvas.pointer-events-none')
+    if (!c) return null
+    const copy = document.createElement('canvas')
+    copy.width = c.width
+    copy.height = c.height
+    const ctx = copy.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(c, 0, 0)
+    const d = ctx.getImageData(0, 0, copy.width, copy.height).data
+    let x0 = Infinity
+    let x1 = -Infinity
+    let y0 = Infinity
+    let y1 = -Infinity
+    let lit = 0
+    for (let y = 0; y < copy.height; y += 2) {
+      for (let x = 0; x < copy.width; x += 2) {
+        if (d[(y * copy.width + x) * 4 + 3] > 8) {
+          lit++
+          if (x < x0) x0 = x
+          if (x > x1) x1 = x
+          if (y < y0) y0 = y
+          if (y > y1) y1 = y
+        }
+      }
+    }
+    if (x1 <= x0) return null
+    return { width: x1 - x0, height: y1 - y0, lit }
+  })
+}
+
+/** Wait until the overlay stops changing, so a measurement is of the finished
+ * picture rather than of a frame partway through layout. */
+async function settled(page: Page) {
+  let last = -1
+  for (let i = 0; i < 40; i++) {
+    const box = await paintedBox(page)
+    const lit = box?.lit ?? 0
+    if (lit > 0 && Math.abs(lit - last) < Math.max(150, lit * 0.02)) return box!
+    last = lit
+    await page.waitForTimeout(250)
+  }
+  throw new Error('the graph never settled')
+}
+
+const orphanGraph = (n: number, tag = 'a') => ({
+  level: 'workload',
+  nodes: Array.from({ length: n }, (_, i) => ({
+    id: `wl:corp/Deployment/svc-${tag}${i}`,
+    kind: 'workload',
+    label: `svc-${tag}${i}`,
+    namespace: 'corp',
+    workloadKind: 'Deployment',
+    replicas: 3,
+    isolation: { ingress: false, egress: false },
+    access: [],
+  })),
+  edges: [],
+})
+
 test('a namespace no policy selects lays out as a grid, not a column', async ({ page }) => {
   // Dagre ranks by edges, so nodes no edge touches all land in rank 0 and come
   // back as one column with an x-span of zero. That is the commonest shape
   // there is — a namespace with no policies has no edges at all, because
   // openness is drawn on the card rather than as edges to a hub — and the
   // camera could only frame the resulting column by zooming out until every
-  // card was a bare dot.
-  //
-  // Measured on the painted pixels rather than on node positions: the previous
-  // behaviour satisfied every assertion about nodes existing and being visible.
-  // The column measured 148x886, the grid 1230x702.
+  // card was a bare dot. The column measured 148x886; the grid, 1230x702.
   await page.route('**/api/graph*', (r) =>
-    r.fulfill({
-      json: {
-        revision: 3,
-        graph: {
-          level: 'workload',
-          nodes: Array.from({ length: 40 }, (_, i) => ({
-            id: `wl:corp/Deployment/svc-${i}`,
-            kind: 'workload',
-            label: `svc-${i}`,
-            namespace: 'corp',
-            workloadKind: 'Deployment',
-            replicas: 3,
-            isolation: { ingress: false, egress: false },
-            access: [],
-          })),
-          edges: [],
-        },
-      },
-    }),
+    r.fulfill({ json: { revision: 3, graph: orphanGraph(40) } }),
   )
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/')
 
-  const painted = async () =>
-    await page.evaluate(() => {
-      const c = document.querySelector<HTMLCanvasElement>('canvas.pointer-events-none')
-      if (!c) return null
-      const copy = document.createElement('canvas')
-      copy.width = c.width
-      copy.height = c.height
-      const ctx = copy.getContext('2d')
-      if (!ctx) return null
-      ctx.drawImage(c, 0, 0)
-      const d = ctx.getImageData(0, 0, copy.width, copy.height).data
-      let x0 = Infinity
-      let x1 = -Infinity
-      let y0 = Infinity
-      let y1 = -Infinity
-      for (let y = 0; y < copy.height; y += 2) {
-        for (let x = 0; x < copy.width; x += 2) {
-          if (d[(y * copy.width + x) * 4 + 3] > 8) {
-            if (x < x0) x0 = x
-            if (x > x1) x1 = x
-            if (y < y0) y0 = y
-            if (y > y1) y1 = y
-          }
-        }
-      }
-      return x1 > x0 ? { width: x1 - x0, height: y1 - y0 } : null
-    })
-
-  await expect.poll(painted, { timeout: 15_000 }).not.toBeNull()
-  const box = (await painted())!
+  const box = await settled(page)
   expect(box.width).toBeGreaterThan(box.height)
+})
+
+test('a pan survives a cluster change, but not a change of view', async ({ page }) => {
+  // The stream sends a fresh graph on any cluster change, and the camera used
+  // to refit on every one of them. On a busy cluster that discarded a pan or a
+  // zoom seconds after it was made, so the view appeared to move on its own.
+  let socket: { send: (data: string) => void } | null = null
+  await page.routeWebSocket(/\/api\/stream/, (ws) => {
+    socket = ws
+    ws.send(JSON.stringify({ type: 'graph', revision: 1, graph: orphanGraph(6) }))
+  })
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 1, graph: orphanGraph(6) } }),
+  )
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/')
+
+  // Measured as how much of the overlay is painted, not where its bounding box
+  // sits: a fitted graph fills the viewport, so its box is clipped by the canvas
+  // edges and hardly moves however far the view is dragged. Panning content off
+  // the edge is unambiguous — the picture loses paint, and a refit restores it.
+  const framed = (await settled(page)).lit
+  await page.mouse.move(900, 620)
+  await page.mouse.down()
+  await page.mouse.move(240, 180, { steps: 16 })
+  await page.mouse.up()
+  await page.waitForTimeout(600)
+
+  const panned = (await settled(page)).lit
+  expect(panned).toBeLessThan(framed * 0.5)
+
+  // A workload is replaced: the node set changes, so the old behaviour refit,
+  // but nothing about it was a request to look somewhere else. The replacement
+  // is the same size and count as what it replaces, so any change in how much
+  // is painted is the camera moving and nothing else.
+  expect(socket).not.toBeNull()
+  socket!.send(JSON.stringify({ type: 'graph', revision: 2, graph: orphanGraph(6, 'b') }))
+  await page.waitForTimeout(1500)
+  expect((await settled(page)).lit).toBeLessThan(framed * 0.5)
+
+  // Asking to see something else is a different matter, and does reframe.
+  await page.getByRole('radio', { name: 'Workload' }).click()
+  await page.waitForTimeout(1500)
+
+  expect((await settled(page)).lit).toBeGreaterThan(framed * 0.7)
 })
