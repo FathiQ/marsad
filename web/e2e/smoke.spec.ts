@@ -303,3 +303,71 @@ test('escape dismisses the suggestion list before the dialog', async ({ page }) 
   await dialog.locator('#sim-to').press('Escape')
   await expect(dialog).toBeHidden()
 })
+
+test('a namespace no policy selects lays out as a grid, not a column', async ({ page }) => {
+  // Dagre ranks by edges, so nodes no edge touches all land in rank 0 and come
+  // back as one column with an x-span of zero. That is the commonest shape
+  // there is — a namespace with no policies has no edges at all, because
+  // openness is drawn on the card rather than as edges to a hub — and the
+  // camera could only frame the resulting column by zooming out until every
+  // card was a bare dot.
+  //
+  // Measured on the painted pixels rather than on node positions: the previous
+  // behaviour satisfied every assertion about nodes existing and being visible.
+  // The column measured 148x886, the grid 1230x702.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: {
+          level: 'workload',
+          nodes: Array.from({ length: 40 }, (_, i) => ({
+            id: `wl:corp/Deployment/svc-${i}`,
+            kind: 'workload',
+            label: `svc-${i}`,
+            namespace: 'corp',
+            workloadKind: 'Deployment',
+            replicas: 3,
+            isolation: { ingress: false, egress: false },
+            access: [],
+          })),
+          edges: [],
+        },
+      },
+    }),
+  )
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/')
+
+  const painted = async () =>
+    await page.evaluate(() => {
+      const c = document.querySelector<HTMLCanvasElement>('canvas.pointer-events-none')
+      if (!c) return null
+      const copy = document.createElement('canvas')
+      copy.width = c.width
+      copy.height = c.height
+      const ctx = copy.getContext('2d')
+      if (!ctx) return null
+      ctx.drawImage(c, 0, 0)
+      const d = ctx.getImageData(0, 0, copy.width, copy.height).data
+      let x0 = Infinity
+      let x1 = -Infinity
+      let y0 = Infinity
+      let y1 = -Infinity
+      for (let y = 0; y < copy.height; y += 2) {
+        for (let x = 0; x < copy.width; x += 2) {
+          if (d[(y * copy.width + x) * 4 + 3] > 8) {
+            if (x < x0) x0 = x
+            if (x > x1) x1 = x
+            if (y < y0) y0 = y
+            if (y > y1) y1 = y
+          }
+        }
+      }
+      return x1 > x0 ? { width: x1 - x0, height: y1 - y0 } : null
+    })
+
+  await expect.poll(painted, { timeout: 15_000 }).not.toBeNull()
+  const box = (await painted())!
+  expect(box.width).toBeGreaterThan(box.height)
+})
