@@ -74,7 +74,10 @@ export function GraphCanvas({
       renderEdgeLabels: false,
       defaultDrawNodeHover: () => {},
       minCameraRatio: 0.06,
-      maxCameraRatio: 4,
+      // High enough that a small graph can be framed at natural size rather
+      // than magnified to fill the viewport: a three-workload namespace needs
+      // roughly 4.2, and the old ceiling of 4 clamped exactly those cases.
+      maxCameraRatio: 16,
     })
     sigma.current = renderer
 
@@ -257,7 +260,21 @@ export function GraphCanvas({
       const card = over.extent()
       const padX = Number.isFinite(spanX) && spanX > 0 ? (spanX + card.width) / spanX : 1
       const padY = Number.isFinite(spanY) && spanY > 0 ? (spanY + card.height) / spanY : 1
-      const ratio = Math.max(padX, padY, 1) * 1.06
+      let ratio = Math.max(padX, padY, 1) * 1.06
+
+      // Never magnify past natural size.
+      //
+      // Sigma scales whatever it is given to fill the viewport, so a namespace
+      // with three workloads was blown up until it did. Card *drawing* is
+      // clamped to a readable band, but their positions are not, so the cards
+      // stayed the size they always are while the gaps between them grew to
+      // most of the screen — three cards adrift in an empty column. One layout
+      // unit is one pixel at 100%, so holding the scale at or below 1:1 is the
+      // whole fix; a graph bigger than the viewport is unaffected.
+      const span = Math.max(Number.isFinite(spanX) ? spanX : 0, Number.isFinite(spanY) ? spanY : 0)
+      const box = container.current
+      const viewport = box ? Math.min(box.clientWidth, box.clientHeight) : 0
+      if (span > 0 && viewport > 0) ratio = Math.max(ratio, viewport / span)
 
       renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio }, { duration: 340 })
     }
