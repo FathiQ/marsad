@@ -435,3 +435,44 @@ test('a pan survives a cluster change, but not a change of view', async ({ page 
 
   expect((await settled(page)).lit).toBeGreaterThan(framed * 0.7)
 })
+
+test('selecting an open workload draws its exposure, unselected does not', async ({ page }) => {
+  // Openness is stated as rows on the card because drawing it for every
+  // unprotected workload is a hairball. For the one card someone selected it is
+  // two lines, and the shape is the thing a graph is for.
+  //
+  // One node, open both ways: unselected the overlay paints a card, selected it
+  // paints a card plus a pill either side, so the painted width has to grow.
+  const exposed = {
+    level: 'workload',
+    nodes: [
+      {
+        id: 'wl:corp/Deployment/runner',
+        kind: 'workload',
+        label: 'runner',
+        namespace: 'corp',
+        workloadKind: 'Deployment',
+        replicas: 1,
+        isolation: { ingress: false, egress: false },
+        access: [],
+      },
+      { id: 'any', kind: 'any', label: 'any' },
+    ],
+    edges: [
+      { id: 'e1', source: 'any', target: 'wl:corp/Deployment/runner', kind: 'default' },
+      { id: 'e2', source: 'wl:corp/Deployment/runner', target: 'any', kind: 'default' },
+    ],
+  }
+  await page.route('**/api/graph*', (r) => r.fulfill({ json: { revision: 3, graph: exposed } }))
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await page.goto('/')
+
+  const before = await settled(page)
+
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('runner')
+  await page.getByRole('option', { name: /runner/ }).first().click()
+
+  const after = await settled(page)
+  expect(after.width).toBeGreaterThan(before.width * 1.5)
+})

@@ -480,6 +480,128 @@ export class OverlayRenderer {
     if (this.groupsVisible && zoom > DOT_SCALE) this.drawGroups(ctx, centres, scale)
     this.drawEdges(ctx, centres, scale, zoom, elapsed)
     this.drawCards(ctx, centres, scale, zoom)
+    // After the cards, because it reads as an annotation on one of them.
+    this.drawExposure(ctx, scale, zoom)
+  }
+
+  /**
+   * The selected card's exposure, drawn as edges to "anything".
+   *
+   * Openness is stated as two rows on the card because drawing it for every
+   * unprotected workload is the hairball that made the graph unreadable — two
+   * lines per workload converging on a single point, carrying nothing the red
+   * ring did not already say. That reasoning still holds for the picture as a
+   * whole, and none of this changes it.
+   *
+   * It does not hold for the one card somebody just clicked. A row of text
+   * states the fact; it does not show the shape, and the shape is what a graph
+   * is for. Two lines, on the card being asked about, cost nothing and answer
+   * the question — and they sit on the same left-to-right axis as every real
+   * edge, so "reaches" and "is reached by" read the same way here as they do
+   * everywhere else.
+   */
+  private drawExposure(ctx: CanvasRenderingContext2D, scale: number, zoom: number) {
+    if (this.selected === null || zoom < DOT_SCALE) return
+    const card = this.cardsById.get(this.selected)
+    if (!card || (!card.openIn && !card.openOut)) return
+    const rect = this.rects.find((r) => r.id === this.selected)
+    if (!rect) return
+
+    const danger = paint('danger')
+    const plate = paint('plate')
+    const label = 'anything'
+    const font = `600 ${Math.round(11 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+
+    ctx.save()
+    ctx.font = font
+    const textW = ctx.measureText(label).width
+    const padX = 10 * scale
+    const pillW = textW + padX * 2
+    const pillH = 24 * scale
+    const gap = 58 * scale
+    const midY = rect.y + rect.h / 2
+    const pillY = midY - pillH / 2
+
+    const pill = (x: number, dy: number) => {
+      ctx.beginPath()
+      ctx.roundRect(x, pillY + dy, pillW, pillH, pillH / 2)
+      ctx.fillStyle = plate
+      ctx.fill()
+      ctx.lineWidth = 1
+      ctx.setLineDash([3 * scale, 3 * scale])
+      ctx.strokeStyle = danger
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = danger
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, x + pillW / 2, midY + dy)
+    }
+
+    // Dashed, because no rule declares this: it is what happens in the absence
+    // of one, and it should not read as a written allow.
+    const arrow = (fromX: number, toX: number, dy: number) => {
+      const y = midY + dy
+      ctx.beginPath()
+      ctx.setLineDash([4 * scale, 4 * scale])
+      ctx.lineWidth = 1.4 * Math.max(scale, 0.7)
+      ctx.strokeStyle = danger
+      ctx.moveTo(fromX, y)
+      ctx.lineTo(toX, y)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      const size = 6 * Math.max(scale, 0.6)
+      const dir = Math.sign(toX - fromX) || 1
+      ctx.beginPath()
+      ctx.moveTo(toX, y)
+      ctx.lineTo(toX - dir * size, y - size * 0.45)
+      ctx.lineTo(toX - dir * size, y + size * 0.45)
+      ctx.closePath()
+      ctx.fillStyle = danger
+      ctx.fill()
+    }
+
+    // Selecting a card opens the inspector, which narrows the canvas under it,
+    // so the side a pill wants is often off screen — and a card that says "open
+    // to anything" while drawing nothing reads as broken. Prefer the side that
+    // matches the flow, fall back to the other, and let the arrowhead carry the
+    // direction when the side cannot.
+    const edgePad = 6 * scale
+    const minGap = 16 * scale
+    const canvasW = this.canvas.width / (window.devicePixelRatio || 1)
+    const right = rect.x + rect.w
+    const roomLeft = rect.x - edgePad >= pillW + minGap
+    const roomRight = canvasW - edgePad - right >= pillW + minGap
+    const pick = (preferred: 'left' | 'right'): 'left' | 'right' | null => {
+      if (preferred === 'left') return roomLeft ? 'left' : roomRight ? 'right' : null
+      return roomRight ? 'right' : roomLeft ? 'left' : null
+    }
+
+    // Sources on the left, destinations on the right — the same axis the
+    // layered layout puts every other edge on.
+    const inSide = card.openIn ? pick('left') : null
+    const outSide = card.openOut ? pick('right') : null
+    // Both crowded onto one side would overlap, so they part vertically.
+    const lift = inSide !== null && inSide === outSide ? pillH * 0.72 : 0
+
+    const place = (which: 'left' | 'right', dy: number, incoming: boolean) => {
+      const wanted = which === 'left' ? rect.x - gap - pillW : right + gap
+      const x =
+        which === 'left'
+          ? Math.max(edgePad, wanted)
+          : Math.min(wanted, canvasW - edgePad - pillW)
+      pill(x, dy)
+      const cardEdge = which === 'left' ? rect.x : right
+      const pillEdge = which === 'left' ? x + pillW : x
+      if (incoming) arrow(pillEdge, cardEdge, dy)
+      else arrow(cardEdge, pillEdge, dy)
+    }
+
+    if (inSide) place(inSide, -lift, true)
+    if (outSide) place(outSide, lift, false)
+
+    ctx.restore()
   }
 
   /**
