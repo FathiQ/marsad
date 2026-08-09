@@ -24,6 +24,7 @@ export const meta = {
   warnings: null,
   combineMode: 'intersect',
   readOnly: true,
+  version: 'v1.2.3-test',
 }
 
 export const namespaces = [

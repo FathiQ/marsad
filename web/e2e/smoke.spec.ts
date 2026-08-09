@@ -476,3 +476,11 @@ test('selecting an open workload draws its exposure, unselected does not', async
   const after = await settled(page)
   expect(after.width).toBeGreaterThan(before.width * 1.5)
 })
+
+test('the header names the build that is answering', async ({ page }) => {
+  // Which binary is running was unanswerable from Marsad itself, so "is this
+  // the fixed build?" took two rounds of guessing. It comes from /api/meta
+  // rather than the bundle: after an upgrade the page may still be the cached
+  // one, and a number baked into it would report the build it was built from.
+  await expect(page.getByRole('banner').getByText('v1.2.3-test')).toBeVisible()
+})

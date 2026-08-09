@@ -62,6 +62,14 @@ export function AppHeader({
       <div className="flex items-center gap-2.5">
         <Mark className="size-[19px] text-fg" />
         <span className="text-[15px] font-semibold tracking-tight">Marsad</span>
+        {/* The build, from the server rather than the bundle: after an upgrade
+            the question is which binary is answering, and a number baked into
+            the page a browser may have cached cannot say. */}
+        {meta?.version && (
+          <span className="num text-[10.5px] text-faint" title="the running build">
+            {meta.version}
+          </span>
+        )}
       </div>
 
       <Separator orientation="vertical" className="h-5" />

@@ -19,6 +19,14 @@ import (
 	"github.com/FathiQ/marsad/pkg/npeval"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=...".
+//
+// It has to exist for that to do anything: Go silently discards -X against a
+// symbol it cannot find, so the build threaded a version through the Makefile,
+// the Dockerfile and CI and dropped it on the floor. Nothing running could say
+// what it was, which turned "is this the fixed build?" into guesswork twice.
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("marsad exited", "error", err)
@@ -85,6 +93,7 @@ func run() error {
 			Log:         log,
 			CombineMode: combine,
 			DevCORS:     *devCORS,
+			Version:     version,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

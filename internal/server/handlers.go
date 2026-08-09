@@ -27,7 +27,17 @@ func (s *Server) handleMeta(w http.ResponseWriter, _ *http.Request) {
 		"warnings":     state.Warnings,
 		"combineMode":  combineModeName(s.opts.CombineMode),
 		"readOnly":     true,
+		"version":      s.version(),
 	})
+}
+
+// version reports the build, falling back to "dev" so the field is always
+// present and the UI never has to decide what a missing one means.
+func (s *Server) version() string {
+	if s.opts.Version == "" {
+		return "dev"
+	}
+	return s.opts.Version
 }
 
 func combineModeName(m npeval.CombineMode) string {

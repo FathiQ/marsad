@@ -35,6 +35,11 @@ type Options struct {
 	// port. Off by default: the production binary serves the UI itself and has
 	// no reason to accept cross-origin requests.
 	DevCORS bool
+
+	// Version is the build this binary came from, reported by /api/meta so that
+	// "which version is running?" is answerable from the thing that is running
+	// rather than inferred from a deployment spec.
+	Version string
 }
 
 // Server holds the HTTP handlers.

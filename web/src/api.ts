@@ -75,6 +75,9 @@ export interface Meta {
   warnings: { object: string; message: string }[] | null
   combineMode: 'intersect' | 'union'
   readOnly: boolean
+  /** The build this Marsad came from. Always present; "dev" for an unstamped
+   * binary. Optional here only so an older server does not break the UI. */
+  version?: string
 }
 
 export interface NamespaceSummary {
