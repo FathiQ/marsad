@@ -12,6 +12,11 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry',
+    // Stated rather than inherited. Marsad defaults to dark, and Playwright
+    // defaults to light, so leaving this out would silently test the theme the
+    // product does not lead with — and the tests that care about the OS
+    // preference say so themselves with test.use().
+    colorScheme: 'dark',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

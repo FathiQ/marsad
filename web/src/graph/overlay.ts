@@ -2,7 +2,16 @@ import type Sigma from 'sigma'
 
 import type { Graph as GraphData, GraphEdge, GraphNode } from '../api'
 import type { LayoutNode } from './layout.worker'
-import { edgeColor, hueFor, isUnprotected, oklch, paint, type NamespacePalette } from './style'
+import {
+  MONO_STACK,
+  SANS_STACK,
+  edgeColor,
+  hueFor,
+  isUnprotected,
+  oklch,
+  paint,
+  type NamespacePalette,
+} from './style'
 
 /**
  * The graph's visual layer: namespace containers, workload cards, edges routed
@@ -280,9 +289,9 @@ export class OverlayRenderer {
       const access = (accessByNode.get(n.id) ?? []).slice(0, 5)
       const count = (n.kind === 'namespace' ? n.workloads : n.replicas) ?? 0
 
-      ctx.font = `600 13px 'Inter var', ui-sans-serif, system-ui, sans-serif`
+      ctx.font = `600 13px ${SANS_STACK}`
       const nameW = ctx.measureText(n.label).width
-      ctx.font = `500 11px ui-monospace, SFMono-Regular, monospace`
+      ctx.font = `500 11px ${MONO_STACK}`
       const accessW = access.reduce(
         (max, a) => Math.max(max, ctx.measureText(`${a.label} ${a.protocol}`).width),
         0,
@@ -510,7 +519,7 @@ export class OverlayRenderer {
     const danger = paint('danger')
     const plate = paint('plate')
     const label = 'anything'
-    const font = `600 ${Math.round(11 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+    const font = `600 ${Math.round(11 * scale)}px ${SANS_STACK}`
 
     ctx.save()
     ctx.font = font
@@ -662,7 +671,7 @@ export class OverlayRenderer {
 
       ctx.globalAlpha = 0.85
       ctx.setLineDash([])
-      ctx.font = `600 ${Math.round(11 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+      ctx.font = `600 ${Math.round(11 * scale)}px ${SANS_STACK}`
       ctx.fillStyle = oklch(0.72, 0.14, hue)
       ctx.textBaseline = 'middle'
       ctx.fillText(namespace, x + 12 * scale, y + 13 * scale)
@@ -926,7 +935,7 @@ export class OverlayRenderer {
       }
 
       const badgeW = card.count > 1 ? 26 * scale : 0
-      ctx.font = `600 ${Math.round(13 * scale)}px 'Inter var', ui-sans-serif, system-ui, sans-serif`
+      ctx.font = `600 ${Math.round(13 * scale)}px ${SANS_STACK}`
       ctx.fillStyle = fg
       ctx.textBaseline = 'middle'
       const room = x + w - PAD_X * scale - badgeW - cursor
@@ -940,7 +949,7 @@ export class OverlayRenderer {
         ctx.roundRect(bx, headerY - bh / 2, bw, bh, bh / 2)
         ctx.fillStyle = plateEdge
         ctx.fill()
-        ctx.font = `600 ${Math.round(10.5 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+        ctx.font = `600 ${Math.round(10.5 * scale)}px ${SANS_STACK}`
         ctx.fillStyle = muted
         ctx.textAlign = 'center'
         ctx.fillText(String(card.count), bx + bw / 2, headerY)
@@ -975,7 +984,7 @@ export class OverlayRenderer {
           }
           ctx.stroke()
 
-          ctx.font = `500 ${Math.round(10.5 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+          ctx.font = `500 ${Math.round(10.5 * scale)}px ${SANS_STACK}`
           ctx.fillStyle = danger
           ctx.fillText(row.label, x + 26 * scale, rowY)
         })
@@ -1000,13 +1009,13 @@ export class OverlayRenderer {
           ctx.lineTo(x + 18.5 * scale, rowY + 2 * scale)
           ctx.stroke()
 
-          ctx.font = `500 ${Math.round(11 * scale)}px ui-monospace, SFMono-Regular, monospace`
+          ctx.font = `500 ${Math.round(11 * scale)}px ${MONO_STACK}`
           ctx.fillStyle = colour
           ctx.fillText(point.label, x + 26 * scale, rowY)
 
           if (point.protocol) {
             const offset = ctx.measureText(point.label).width + 32 * scale
-            ctx.font = `500 ${Math.round(9.5 * scale)}px 'Inter var', ui-sans-serif, sans-serif`
+            ctx.font = `500 ${Math.round(9.5 * scale)}px ${SANS_STACK}`
             ctx.fillStyle = faint
             ctx.fillText(point.protocol, x + offset, rowY)
           }

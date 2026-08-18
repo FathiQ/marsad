@@ -1,7 +1,44 @@
 @import 'tailwindcss';
 
+/*
+ * Self-hosted, not fetched from a CDN.
+ *
+ * Marsad runs inside the cluster it is reading, and a fair number of those have
+ * no egress to fonts.googleapis.com — or have policy forbidding it, which would
+ * be a particularly poor look for this tool. Both faces are the latin variable
+ * subsets, 88KB together, bundled by Vite and served from the same pod as
+ * everything else.
+ *
+ * `Inter var` was named in the font stack for months without ever being loaded,
+ * so the UI has always silently rendered in system-ui. It renders in Inter now.
+ * Licences are in web/src/fonts/ and listed in web/THIRD-PARTY.md.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('./fonts/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('./fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* Dark is the default: this is an ops tool and it will live on a wall display or
-   beside a terminal. Light is a deliberate toggle, not a fallback. */
+   beside a terminal. Light is a deliberate toggle — but a viewer whose OS asks
+   for light gets it without touching anything, so the toggle is a preference
+   rather than the only way in. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 /* `inline` makes each utility reference the variable rather than baking its
@@ -12,87 +49,205 @@
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-elevated: var(--elevated);
+  --color-overlay: var(--overlay);
+  --color-panel: var(--panel);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-line-faint: var(--line-faint);
 
   --color-fg: var(--fg);
+  --color-text-strong: var(--text-strong);
+  --color-text-body: var(--text-body);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
+  --color-text-dim: var(--text-dim);
 
   --color-accent: var(--accent);
   --color-accent-fg: var(--accent-fg);
 
   --color-allowed: var(--allowed);
+  --color-allowed-text: var(--allowed-text);
   --color-neutral-edge: var(--neutral-edge);
   --color-approx: var(--approx);
+  --color-approx-text: var(--approx-text);
   --color-danger: var(--danger);
   --color-warn: var(--warn);
 
-  --font-sans: 'Inter var', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --color-node-domain: var(--node-domain);
+  --color-node-cidr: var(--node-cidr);
+  --color-node-world: var(--node-world);
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
   --radius-card: 0.75rem;
 }
 
+/*
+ * The token table.
+ *
+ * Authored in hex rather than oklch, for two reasons that both come down to
+ * having one source of truth. Sigma's WebGL colour parser understands hex and
+ * rgb() only and falls back to black *silently* on anything else, so the canvas
+ * used to carry a hand-converted second copy of this table — which is how
+ * --node-world and --danger came to be the same colour in two files at once.
+ * With hex here, graph/style.ts reads these variables directly and the copy is
+ * gone. And internal/theme asserts the WCAG floors against exactly these bytes,
+ * rather than against its own reimplementation of the oklch conversion.
+ *
+ * Contrast floors, enforced by internal/theme/contrast_test.go:
+ *   text tokens        4.5:1 against both --bg and --surface
+ *   structural tokens  3.0:1 (borders, strokes, node fills)
+ * Change a value here and that test tells you what it costs.
+ */
 :root {
-  --bg: oklch(0.16 0.014 265);
-  --canvas: oklch(0.174 0.016 265);
-  --surface: oklch(0.204 0.017 265);
-  --elevated: oklch(0.245 0.019 265);
-  --line: oklch(0.29 0.018 265);
-  --line-strong: oklch(0.37 0.02 265);
+  --bg: #0a0d13;
+  --canvas: #0d1017;
+  --surface: #13171f;
+  --elevated: #1c202a;
+  --overlay: #1a1f29;
+  --panel: #12151d;
 
-  --fg: oklch(0.96 0.006 265);
-  --muted: oklch(0.72 0.02 265);
-  --faint: oklch(0.57 0.022 265);
+  --line: #272b35;
+  --line-strong: #3b404b;
+  /* Chevrons and scrollbar thumbs: not text, but a control you have to find. */
+  --line-faint: #5e6474;
 
-  --accent: oklch(0.68 0.17 255);
-  --accent-fg: oklch(0.99 0 0);
+  --fg: #f0f2f6;
+  --text-strong: #d5d9e1;
+  --text-body: #c8ceda;
+  --muted: #9ea5b2;
+  /* One step lighter than the brief's #7c8290, which cleared --bg at 5.05 but
+     only reached 4.29 on a --surface card. Text sits on cards. */
+  --faint: #858b99;
+  /* Section labels — every one of them. Was 3.11:1. */
+  --text-dim: #7c8290;
+
+  --accent: #4699fe;
+  --accent-fg: #06121f;
 
   /* Green is "a rule says yes", grey is "nothing said no", amber is "we cannot
-     tell from configuration". They differ in weight as well as hue, because a
-     fair number of ops people are red/green colourblind. */
-  --allowed: oklch(0.76 0.17 155);
-  --neutral-edge: oklch(0.58 0.02 265);
-  --approx: oklch(0.79 0.15 78);
-  --danger: oklch(0.68 0.19 22);
-  --warn: oklch(0.79 0.15 78);
+     tell from configuration". They differ in weight and dash pattern as well as
+     hue, because a fair number of ops people are red/green colourblind. */
+  --allowed: #38d080;
+  --neutral-edge: #747a87;
+  --approx: #efad32;
+  --danger: #f75c61;
+  --warn: var(--approx);
 
-  --node-domain: oklch(0.72 0.17 305);
-  --node-cidr: oklch(0.75 0.16 55);
-  --node-world: oklch(0.68 0.19 22);
+  /* An edge stroke wants to stay vivid; a label wants to stay legible. One
+     value cannot be both once the ground turns white, so the text roles are
+     their own tokens. In dark they coincide — the stroke colours already clear
+     4.5:1 here — and they diverge only where they must. */
+  --allowed-text: var(--allowed);
+  --approx-text: var(--approx);
+
+  --node-domain: #be85f9;
+  /* Cyan, not the orange it used to be: --node-world is orange now, and two
+     kinds of "not a workload" must not share a hue. */
+  --node-cidr: #52c7d6;
+  /* Orange, NOT --danger. "Outside the cluster" and "unprotected" were the same
+     red and could not be told apart. */
+  --node-world: #f98f3a;
+
   /* Pictograms sit on the node fill, so they need to read against a saturated
      mid-tone rather than against the page. */
-  --picto: oklch(0.18 0.015 265);
+  --picto: #0f1219;
+  /* The plate a canvas card is drawn on. Named rather than borrowed from
+     --surface because it sits above --canvas, which --surface does not. */
+  --card-plate: #1c202a;
 
   color-scheme: dark;
 }
 
+/*
+ * Light, defined once and applied from two places.
+ *
+ * The media query is guarded so that an explicit dark choice beats a light OS,
+ * and the attribute selector repeats the block so the toggle wins in the other
+ * direction. Neither is redundant: the common case is a viewer with no stored
+ * choice at all, and only the media query reaches them.
+ */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: #f6f8fa;
+    --canvas: #ffffff;
+    --surface: #ffffff;
+    --elevated: #eef1f5;
+    --overlay: #ffffff;
+    --panel: #f1f4f8;
+
+    --line: #e2e7ed;
+    --line-strong: #c9d1db;
+    --line-faint: #858e9d;
+
+    --fg: #111620;
+    --text-strong: #28313d;
+    --text-body: #3c4653;
+    --muted: #525c6a;
+    --faint: #616b79;
+    --text-dim: #66707e;
+
+    --accent: #1668d6;
+    --accent-fg: #ffffff;
+
+    --allowed: #12854a;
+    --neutral-edge: #7c8593;
+    --approx: #9e6a06;
+    --danger: #c42b36;
+    --warn: var(--approx);
+
+    --allowed-text: #0f7442;
+    --approx-text: #8a5c05;
+
+    --node-domain: #7c35c9;
+    --node-cidr: #0f7a8c;
+    --node-world: #b85a08;
+
+    --picto: #ffffff;
+    --card-plate: #ffffff;
+
+    color-scheme: light;
+  }
+}
+
 [data-theme='light'] {
-  --bg: oklch(0.985 0.002 265);
-  --canvas: oklch(0.995 0.001 265);
-  --surface: oklch(1 0 0);
-  --elevated: oklch(1 0 0);
-  --line: oklch(0.915 0.005 265);
-  --line-strong: oklch(0.84 0.008 265);
+  --bg: #f6f8fa;
+  --canvas: #ffffff;
+  --surface: #ffffff;
+  --elevated: #eef1f5;
+  --overlay: #ffffff;
+  --panel: #f1f4f8;
 
-  --fg: oklch(0.22 0.02 265);
-  --muted: oklch(0.47 0.02 265);
-  --faint: oklch(0.63 0.018 265);
+  --line: #e2e7ed;
+  --line-strong: #c9d1db;
+  --line-faint: #858e9d;
 
-  --accent: oklch(0.55 0.2 258);
-  --accent-fg: oklch(1 0 0);
+  --fg: #111620;
+  --text-strong: #28313d;
+  --text-body: #3c4653;
+  --muted: #525c6a;
+  --faint: #616b79;
+  --text-dim: #66707e;
 
-  --allowed: oklch(0.58 0.15 155);
-  --neutral-edge: oklch(0.68 0.015 265);
-  --approx: oklch(0.62 0.14 65);
-  --danger: oklch(0.56 0.2 25);
-  --warn: oklch(0.62 0.14 65);
+  --accent: #1668d6;
+  --accent-fg: #ffffff;
 
-  --node-domain: oklch(0.55 0.19 300);
-  --node-cidr: oklch(0.62 0.16 50);
-  --node-world: oklch(0.56 0.2 25);
-  --picto: oklch(0.99 0 0);
+  --allowed: #12854a;
+  --neutral-edge: #7c8593;
+  --approx: #9e6a06;
+  --danger: #c42b36;
+  --warn: var(--approx);
+
+  --allowed-text: #0f7442;
+  --approx-text: #8a5c05;
+
+  --node-domain: #7c35c9;
+  --node-cidr: #0f7a8c;
+  --node-world: #b85a08;
+
+  --picto: #ffffff;
+  --card-plate: #ffffff;
 
   color-scheme: light;
 }
@@ -127,13 +282,15 @@
     height: 11px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--line-strong);
+    /* Was --line-strong, which is a 1.8:1 border colour: the thumb was a control
+       you had to already know was there. */
+    background: var(--line-faint);
     border-radius: 999px;
     border: 3px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--faint);
+    background: var(--muted);
     background-clip: content-box;
   }
   ::-webkit-scrollbar-track {
@@ -153,7 +310,7 @@
   }
 
   .glass {
-    background: color-mix(in oklab, var(--elevated) 78%, transparent);
+    background: color-mix(in oklab, var(--overlay) 78%, transparent);
     backdrop-filter: blur(16px) saturate(1.4);
   }
 
@@ -163,6 +320,13 @@
     box-shadow:
       inset 0 1px 0 0 color-mix(in oklab, white 6%, transparent),
       0 1px 2px 0 rgb(0 0 0 / 0.28);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme='dark']) .rim {
+      box-shadow:
+        inset 0 1px 0 0 rgb(255 255 255 / 0.9),
+        0 1px 2px 0 rgb(15 23 42 / 0.06);
+    }
   }
   [data-theme='light'] .rim {
     box-shadow:
@@ -200,4 +364,11 @@
 }
 .splash-sweep {
   animation: marsad-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-sweep,
+  .animate-pulse-dot {
+    animation: none;
+  }
 }

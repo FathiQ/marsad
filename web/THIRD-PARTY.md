@@ -28,3 +28,38 @@ OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
 ```
+
+## Inter
+
+`src/fonts/inter-latin-wght-normal.woff2` is the latin subset of the Inter
+variable font, taken unmodified from the `@fontsource-variable/inter` package
+(v5.3.0). It is vendored rather than fetched from a CDN at runtime: Marsad runs
+inside the cluster it reads, and plenty of those have no egress to a font host —
+or a NetworkPolicy forbidding it, which would be a poor look for this tool in
+particular.
+
+Inter is licensed under the SIL Open Font License 1.1. The full licence is in
+`src/fonts/inter-LICENSE.txt`.
+
+```
+Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+```
+
+## JetBrains Mono
+
+`src/fonts/jetbrains-mono-latin-wght-normal.woff2` is the latin subset of the
+JetBrains Mono variable font, taken unmodified from the
+`@fontsource-variable/jetbrains-mono` package (v5.3.0). It sets ports, policy
+names, hostnames and YAML — everything where a character has to be unambiguous.
+
+JetBrains Mono is licensed under the SIL Open Font License 1.1. The full licence
+is in `src/fonts/jetbrains-mono-LICENSE.txt`.
+
+```
+Copyright 2020 The JetBrains Mono Project Authors
+(https://github.com/JetBrains/JetBrainsMono)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+```

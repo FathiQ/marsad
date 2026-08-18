@@ -35,6 +35,14 @@ import {
 
 type Theme = 'dark' | 'light'
 
+const STORED_THEME = 'marsad.theme'
+const prefersLight = () => window.matchMedia('(prefers-color-scheme: light)').matches
+
+/** What the OS asked for, used until the viewer says otherwise. */
+function systemTheme(): Theme {
+  return prefersLight() ? 'light' : 'dark'
+}
+
 /**
  * Applied synchronously rather than from an effect.
  *
@@ -45,10 +53,21 @@ type Theme = 'dark' | 'light'
  */
 function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme
-  localStorage.setItem('marsad.theme', theme)
 }
 
-const initialTheme: Theme = (localStorage.getItem('marsad.theme') as Theme | null) ?? 'dark'
+/**
+ * Written only when the viewer picks one.
+ *
+ * Storing the OS preference on first load would pin it forever: someone whose
+ * machine turns light at sunrise would keep getting the dark theme because
+ * Marsad recorded an answer they never gave.
+ */
+function persistTheme(theme: Theme) {
+  localStorage.setItem(STORED_THEME, theme)
+}
+
+const stored = localStorage.getItem(STORED_THEME) as Theme | null
+const initialTheme: Theme = stored ?? systemTheme()
 applyTheme(initialTheme)
 
 function Overlay({
@@ -89,6 +108,7 @@ export default function App() {
   const [showGroups, setShowGroups] = useState(true)
 
   const [theme, setTheme] = useState<Theme>(initialTheme)
+  const [pinnedTheme, setPinnedTheme] = useState(stored !== null)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -154,6 +174,21 @@ export default function App() {
       setConnected,
     )
   }, [query, loadSummaries])
+
+  // Follow the OS until the viewer picks a side. Someone who has never touched
+  // the toggle should see the machine turn light at sunrise, not stay dark
+  // because Marsad recorded a preference on their behalf.
+  useEffect(() => {
+    if (pinnedTheme) return
+    const query = window.matchMedia('(prefers-color-scheme: light)')
+    const onChange = () => {
+      const next = systemTheme()
+      applyTheme(next)
+      setTheme(next)
+    }
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [pinnedTheme])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -275,6 +310,8 @@ export default function App() {
           onToggleTheme={() => {
             const next = theme === 'dark' ? 'light' : 'dark'
             applyTheme(next)
+            persistTheme(next)
+            setPinnedTheme(true)
             setTheme(next)
           }}
           onOpenSearch={() => setPaletteOpen(true)}
