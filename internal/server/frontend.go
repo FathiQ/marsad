@@ -33,8 +33,28 @@ func frontendHandler() http.Handler {
 				r.URL.Path = "/"
 			}
 		}
+
+		w.Header().Set("Cache-Control", cacheControl(r.URL.Path))
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// cacheControl decides how long a browser may keep something.
+//
+// An embed.FS gives the file server nothing to work with: every entry has a
+// zero ModTime, so no Last-Modified and no ETag go out. With no Cache-Control
+// either, a browser is left to invent its own policy — and an upgraded Marsad
+// could go on serving the index it already had, which is indistinguishable
+// from an upgrade that did not happen.
+//
+// Vite fingerprints everything under /assets, so those names change whenever
+// their contents do and they can be kept forever. The index that points at
+// them must not be, or the new names are never learned.
+func cacheControl(path string) string {
+	if strings.HasPrefix(path, "/assets/") {
+		return "public, max-age=31536000, immutable"
+	}
+	return "no-cache"
 }
 
 func pathBase(p string) string {
