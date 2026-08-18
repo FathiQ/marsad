@@ -49,6 +49,68 @@ const MAX_W = 268
 const GLYPH = 15
 const RADIUS = 10
 
+/** Shown where the replica count would be, on a workload no policy selects. */
+const NO_POLICY_LABEL = 'no policy'
+
+/**
+ * The ↙ / ↗ on an exposure row, drawn rather than typed.
+ *
+ * `incoming` points down-left, into the card; outgoing points up-right, away
+ * from it — the same convention the access rows use, so a card reads as one
+ * list of arrivals and departures.
+ */
+function drawDiagonalArrow(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  incoming: boolean,
+  colour: string,
+) {
+  const half = size / 2
+  // Tail to head along the diagonal.
+  const [tx, ty, hx, hy] = incoming
+    ? [cx + half, cy - half, cx - half, cy + half]
+    : [cx - half, cy + half, cx + half, cy - half]
+
+  ctx.save()
+  ctx.strokeStyle = colour
+  ctx.fillStyle = colour
+  ctx.lineWidth = Math.max(1.1, size * 0.14)
+  ctx.lineCap = 'round'
+
+  ctx.beginPath()
+  ctx.moveTo(tx, ty)
+  ctx.lineTo(hx, hy)
+  ctx.stroke()
+
+  // A filled head, so the direction survives being drawn at 60% scale.
+  const barb = size * 0.42
+  const ux = (hx - tx) / size
+  const uy = (hy - ty) / size
+  ctx.beginPath()
+  ctx.moveTo(hx, hy)
+  ctx.lineTo(hx - barb * (ux * 0.7 - uy * 0.7), hy - barb * (uy * 0.7 + ux * 0.7))
+  ctx.lineTo(hx - barb * (ux * 0.7 + uy * 0.7), hy - barb * (uy * 0.7 - ux * 0.7))
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
+
+/**
+ * A token colour at partial opacity.
+ *
+ * globalAlpha is the usual way to do this, but it applies to everything drawn
+ * until it is reset, and these tints sit in the middle of a run of opaque
+ * strokes that must not be affected. Tokens are hex, so a suffix is enough.
+ */
+function withAlpha(hex: string, alpha: number): string {
+  const byte = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+    .toString(16)
+    .padStart(2, '0')
+  return /^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${byte}` : hex
+}
+
 /**
  * Level-of-detail thresholds, and the clamp that keeps them from thrashing.
  *
@@ -83,6 +145,10 @@ interface Card {
    * isolates it. Stated on the card rather than drawn as edges — see setData. */
   openIn: boolean
   openOut: boolean
+  /** No policy selects this workload at all, so the count badge gives way to
+   * saying so. Distinct from `unprotected`, which a namespace card also sets
+   * when any workload inside it qualifies. */
+  noPolicy: boolean
   w: number
   h: number
 }
@@ -297,11 +363,46 @@ export class OverlayRenderer {
         0,
       )
 
-      const open = { in: openIn.has(n.id), out: openOut.has(n.id) }
-      const openRows = (open.in ? 1 : 0) + (open.out ? 1 : 0)
+      /*
+       * Exposure comes from the workload's own isolation, not from whether a
+       * default edge happens to be in the payload.
+       *
+       * The server omits those edges entirely when includeDefault is off — it
+       * is a filter in the rail — and deriving the card rows from them meant
+       * unticking "allowed by default" also erased the fact that a workload is
+       * unprotected. That filter is about decluttering the lines between nodes;
+       * it was never meant to suppress the finding.
+       *
+       * Namespace cards keep the edge-derived answer: their isolation is ANDed
+       * across every member, so "not isolated" there means "at least one
+       * workload inside is", which is a different sentence than the one these
+       * rows say.
+       */
+      const open =
+        n.kind === 'workload' && n.isolation
+          ? { in: !n.isolation.ingress, out: !n.isolation.egress }
+          : { in: openIn.has(n.id), out: openOut.has(n.id) }
+      // The two exposure rows, plus the UNPROTECTED heading that labels them.
+      // Without the heading the rows read as two more access points, which is
+      // the opposite of what they mean: every other row on this card is
+      // something a rule permits, and these two are what happens when no rule
+      // exists at all.
+      const exposureRows = open.in || open.out
+        ? (open.in ? 1 : 0) + (open.out ? 1 : 0) + 1
+        : 0
+
+      // An unprotected workload trades its replica count for the reason it is
+      // drawn in danger colour. How many copies of it are running is a detail;
+      // that nothing selects any of them is the finding.
+      const noPolicy = n.kind === 'workload' && isUnprotected(n)
+      ctx.font = `600 10px ${SANS_STACK}`
+      const badgeW = noPolicy
+        ? ctx.measureText(NO_POLICY_LABEL).width + 14
+        : count > 1
+          ? 26
+          : 0
 
       const glyphW = n.kind === 'workload' && !showKind ? 0 : GLYPH + 8
-      const badgeW = count > 1 ? 26 : 0
       const w = Math.max(
         MIN_W,
         Math.min(MAX_W, Math.max(PAD_X + glyphW + nameW + badgeW + PAD_X, accessW + 60)),
@@ -319,8 +420,13 @@ export class OverlayRenderer {
         access,
         openIn: open.in,
         openOut: open.out,
-        w: Math.max(w, openRows ? 190 : 0),
-        h: HEADER_H + (access.length + openRows ? (access.length + openRows) * ROW_H + 6 : 0),
+        noPolicy,
+        // Wider than a plain card: "any port  from anywhere" has to fit on one
+        // line, because wrapping it would bury the half that says "anywhere".
+        w: Math.max(w, exposureRows ? 214 : 0),
+        h:
+          HEADER_H +
+          (access.length + exposureRows ? (access.length + exposureRows) * ROW_H + 6 : 0),
       }
     })
 
@@ -934,14 +1040,42 @@ export class OverlayRenderer {
         cursor += (GLYPH + 8) * scale
       }
 
-      const badgeW = card.count > 1 ? 26 * scale : 0
+      // The badge is either the replica count or, when nothing selects the
+      // workload, the reason the card is red. Measured before the name is drawn
+      // so the name truncates around it rather than under it.
+      ctx.font = `600 ${Math.round(10 * scale)}px ${SANS_STACK}`
+      const badgeW = card.noPolicy
+        ? ctx.measureText(NO_POLICY_LABEL).width + 14 * scale
+        : card.count > 1
+          ? 26 * scale
+          : 0
+
       ctx.font = `600 ${Math.round(13 * scale)}px ${SANS_STACK}`
       ctx.fillStyle = fg
       ctx.textBaseline = 'middle'
       const room = x + w - PAD_X * scale - badgeW - cursor
       ctx.fillText(truncate(ctx, card.label, room), cursor, headerY)
 
-      if (card.count > 1) {
+      if (card.noPolicy) {
+        const bh = 16 * scale
+        const bx = x + w - PAD_X * scale - badgeW
+        ctx.beginPath()
+        ctx.roundRect(bx, headerY - bh / 2, badgeW, bh, bh / 2)
+        // Outlined rather than filled: a solid danger badge next to a danger
+        // border turns the whole header into one red mass and the name stops
+        // being the first thing read.
+        ctx.fillStyle = withAlpha(danger, 0.14)
+        ctx.fill()
+        ctx.lineWidth = 1
+        ctx.strokeStyle = withAlpha(danger, 0.5)
+        ctx.stroke()
+
+        ctx.font = `600 ${Math.round(10 * scale)}px ${SANS_STACK}`
+        ctx.fillStyle = danger
+        ctx.textAlign = 'center'
+        ctx.fillText(NO_POLICY_LABEL, bx + badgeW / 2, headerY)
+        ctx.textAlign = 'left'
+      } else if (card.count > 1) {
         const bw = 22 * scale
         const bh = 16 * scale
         const bx = x + w - PAD_X * scale - bw
@@ -959,35 +1093,56 @@ export class OverlayRenderer {
       // Access points, then the open rows. Both are drawn as rows so the card
       // reads as one list of "what can reach me, and how".
       if (!compact) {
-        const openRows: { label: string; incoming: boolean }[] = []
-        if (card.openIn) openRows.push({ label: 'open from anything', incoming: true })
-        if (card.openOut) openRows.push({ label: 'open to anything', incoming: false })
+        /*
+         * What Kubernetes permits when nothing selects the workload.
+         *
+         * Written as a labelled block rather than as two more rows, because the
+         * rows above it are access points — ports a rule opened — and these two
+         * are the opposite: no rule, every port, either direction. Reading them
+         * as a fourth and fifth access point would be exactly backwards.
+         *
+         * The port column says "any port" in the same place the access rows put
+         * a number, so the eye compares like with like: 8080, 443, any.
+         */
+        const exposure: { peer: string; incoming: boolean }[] = []
+        if (card.openIn) exposure.push({ peer: 'from anywhere', incoming: true })
+        if (card.openOut) exposure.push({ peer: 'to anywhere', incoming: false })
 
-        openRows.forEach((row, i) => {
-          const rowY = y + (HEADER_H + 6 + (card.access.length + i) * ROW_H + ROW_H / 2) * scale
+        if (exposure.length > 0) {
+          const headingY =
+            y + (HEADER_H + 6 + card.access.length * ROW_H + ROW_H / 2) * scale
 
-          ctx.strokeStyle = danger
-          ctx.lineWidth = 1.2 * scale
-          ctx.beginPath()
-          if (row.incoming) {
-            ctx.moveTo(x + 10 * scale, rowY)
-            ctx.lineTo(x + 20 * scale, rowY)
-            ctx.moveTo(x + 17 * scale, rowY - 2.5 * scale)
-            ctx.lineTo(x + 20 * scale, rowY)
-            ctx.lineTo(x + 17 * scale, rowY + 2.5 * scale)
-          } else {
-            ctx.moveTo(x + 20 * scale, rowY)
-            ctx.lineTo(x + 10 * scale, rowY)
-            ctx.moveTo(x + 13 * scale, rowY - 2.5 * scale)
-            ctx.lineTo(x + 10 * scale, rowY)
-            ctx.lineTo(x + 13 * scale, rowY + 2.5 * scale)
-          }
-          ctx.stroke()
-
-          ctx.font = `500 ${Math.round(10.5 * scale)}px ${SANS_STACK}`
+          // UNPROTECTED is reserved for a workload no policy selects in either
+          // direction. A workload that is egress-isolated but open to the world
+          // on ingress is a real finding too, but calling it unprotected is
+          // wrong — a policy does select it — and overstating one finding is
+          // how a tool teaches people to discount the rest. "NOT ISOLATED" is
+          // the same word the inspector's per-direction badge uses.
+          ctx.font = `600 ${Math.round(9 * scale)}px ${SANS_STACK}`
           ctx.fillStyle = danger
-          ctx.fillText(row.label, x + 26 * scale, rowY)
-        })
+          ctx.fillText(card.noPolicy ? 'UNPROTECTED' : 'NOT ISOLATED', x + 10 * scale, headingY)
+
+          exposure.forEach((row, i) => {
+            const rowY =
+              y +
+              (HEADER_H + 6 + (card.access.length + 1 + i) * ROW_H + ROW_H / 2) * scale
+
+            // Stroked, not a glyph. ↙ and ↗ are outside the latin subset of the
+            // vendored Inter, so the canvas fell through to whatever the system
+            // offered and drew something closer to a tick than an arrow — which
+            // on a row about exposure read as reassurance.
+            drawDiagonalArrow(ctx, x + 14 * scale, rowY, 9 * scale, row.incoming, danger)
+
+            ctx.font = `500 ${Math.round(11 * scale)}px ${MONO_STACK}`
+            ctx.fillStyle = danger
+            ctx.fillText('any port', x + 26 * scale, rowY)
+
+            const offset = ctx.measureText('any port').width + 34 * scale
+            ctx.font = `500 ${Math.round(10 * scale)}px ${SANS_STACK}`
+            ctx.fillStyle = withAlpha(danger, 0.82)
+            ctx.fillText(row.peer, x + offset, rowY)
+          })
+        }
 
         card.access.forEach((point, i) => {
           const rowY = y + (HEADER_H + 6 + i * ROW_H + ROW_H / 2) * scale

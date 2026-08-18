@@ -570,6 +570,157 @@ test('selecting an open workload draws its exposure, unselected does not', async
   expect(after.width).toBeGreaterThan(before.width * 1.5)
 })
 
+/** How many painted pixels are within `tolerance` of a colour, sampled on a
+ * grid. Used to ask whether the overlay drew something in danger colour at all,
+ * which is not a question the painted bounding box can answer. */
+async function countNear(page: Page, rgb: [number, number, number], tolerance = 40) {
+  return await page.evaluate(
+    ({ rgb, tolerance }) => {
+      const c = document.querySelector<HTMLCanvasElement>('canvas.pointer-events-none')
+      if (!c) return 0
+      const copy = document.createElement('canvas')
+      copy.width = c.width
+      copy.height = c.height
+      const ctx = copy.getContext('2d')
+      if (!ctx) return 0
+      ctx.drawImage(c, 0, 0)
+      const d = ctx.getImageData(0, 0, copy.width, copy.height).data
+      let hits = 0
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3]! < 120) continue
+        if (
+          Math.abs(d[i]! - rgb[0]) < tolerance &&
+          Math.abs(d[i + 1]! - rgb[1]) < tolerance &&
+          Math.abs(d[i + 2]! - rgb[2]) < tolerance
+        ) {
+          hits++
+        }
+      }
+      return hits
+    },
+    { rgb, tolerance },
+  )
+}
+
+const soloWorkload = (isolated: boolean) => ({
+  level: 'workload',
+  nodes: [
+    {
+      id: 'wl:corp/Deployment/worker',
+      kind: 'workload',
+      label: 'worker',
+      namespace: 'corp',
+      workloadKind: 'Deployment',
+      replicas: 1,
+      isolation: { ingress: isolated, egress: isolated },
+      access: [],
+    },
+    { id: 'any', kind: 'any', label: 'any' },
+  ],
+  edges: isolated
+    ? []
+    : [
+        { id: 'e1', source: 'any', target: 'wl:corp/Deployment/worker', kind: 'default' },
+        { id: 'e2', source: 'wl:corp/Deployment/worker', target: 'any', kind: 'default' },
+      ],
+})
+
+test('an unprotected card says so at rest, without being selected', async ({ page }) => {
+  // The whole point of the signal is that you see it while scanning, before you
+  // have clicked anything. A card that only turns red on selection cannot be
+  // the thing that makes you look.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: soloWorkload(false) } }),
+  )
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await settled(page)
+
+  // #f75c61 — the dark theme's --danger.
+  const danger = await countNear(page, [0xf7, 0x5c, 0x61])
+  expect(danger).toBeGreaterThan(200)
+})
+
+test('a protected card is not painted in danger colour', async ({ page }) => {
+  // The counterpart, so the test above is measuring the posture rather than
+  // just the fact that the overlay paints something.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: soloWorkload(true) } }),
+  )
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await settled(page)
+
+  const danger = await countNear(page, [0xf7, 0x5c, 0x61])
+  expect(danger).toBeLessThan(50)
+})
+
+test('an unprotected card is taller, because it carries its exposure', async ({ page }) => {
+  // The UNPROTECTED block is a heading plus two rows. A card without one is
+  // header-only, so the difference is structural and not a matter of styling.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: soloWorkload(true) } }),
+  )
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  const protectedBox = await settled(page)
+
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: soloWorkload(false) } }),
+  )
+  await page.reload()
+  const openBox = await settled(page)
+
+  expect(openBox.height).toBeGreaterThan(protectedBox.height)
+})
+
+test('the inspector explains an unprotected workload rather than leaving a blank', async ({
+  page,
+}) => {
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByRole('option', { name: /legacy/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector).toBeVisible()
+
+  // The banner states the consequence, not just the fact.
+  await expect(
+    inspector.getByText(
+      'No policy selects this workload, so Kubernetes allows everything to and from it',
+    ),
+  ).toBeVisible()
+
+  // Both directions, named the way the evaluator names them.
+  await expect(inspector.getByText('ingress not isolated')).toBeVisible()
+  await expect(inspector.getByText('egress not isolated')).toBeVisible()
+
+  // The exposure is rendered as rules, with the thing that decided them.
+  // Exact, because the banner's prose above also ends "and out to anywhere".
+  await expect(inspector.getByText('from anywhere', { exact: true })).toBeVisible()
+  await expect(inspector.getByText('to anywhere', { exact: true })).toBeVisible()
+  await expect(inspector.getByText('no rule — Kubernetes default')).toHaveCount(2)
+
+  // Zero applied policies is a real empty state, not a sentence in a gap.
+  await expect(inspector.getByText('Applied policies (0)')).toBeVisible()
+  await expect(inspector.getByText('Nothing selects this workload')).toBeVisible()
+})
+
+test('a protected workload keeps its rules and its policy list', async ({ page }) => {
+  // Guards the branch: the unprotected treatment must not leak onto a workload
+  // that policies do cover.
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector.getByText('ingress isolated')).toBeVisible()
+  await expect(
+    inspector.getByText('No policy selects this workload, so Kubernetes allows everything'),
+  ).toBeHidden()
+  await expect(inspector.getByText('Nothing selects this workload')).toBeHidden()
+})
+
 test('the header names the build that is answering', async ({ page }) => {
   // Which binary is running was unanswerable from Marsad itself, so "is this
   // the fixed build?" took two rounds of guessing. It comes from /api/meta

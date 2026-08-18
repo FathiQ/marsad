@@ -145,6 +145,38 @@ export const workloadDetail = {
   },
 }
 
+/**
+ * The workload nothing selects.
+ *
+ * Both directions come back `isolated: false` with no allows and no applied
+ * policies, which is what the server sends for a pod no podSelector matches.
+ * It is the shape behind Marsad's headline number, so the panel has to say what
+ * it means rather than leaving a blank where the rules would be.
+ */
+export const unprotectedDetail = {
+  workload: {
+    ref: { group: 'apps', kind: 'Deployment', namespace: 'prod', name: 'legacy' },
+    kind: 'Deployment',
+    labels: { app: 'legacy' },
+    replicas: 1,
+    ports: [{ name: 'http', port: 8080, protocol: 'TCP' }],
+  },
+  isolation: { ingress: false, egress: false },
+  policies: [],
+  ingress: {
+    workload: { kind: 'Deployment', namespace: 'prod', name: 'legacy' },
+    direction: 0,
+    isolated: false,
+    allows: [],
+  },
+  egress: {
+    workload: { kind: 'Deployment', namespace: 'prod', name: 'legacy' },
+    direction: 1,
+    isolated: false,
+    allows: [],
+  },
+}
+
 /** A denied connection whose two halves disagree — the case the panel exists
  * for. The source may not leave; the destination would have accepted. */
 export const verdict = {
@@ -172,6 +204,10 @@ export async function mockApi(page: Page) {
   await page.route('**/api/meta', (r) => r.fulfill({ json: meta }))
   await page.route('**/api/namespaces', (r) => r.fulfill({ json: namespaces }))
   await page.route('**/api/graph*', (r) => r.fulfill({ json: { revision: 3, graph } }))
-  await page.route('**/api/workloads/**', (r) => r.fulfill({ json: workloadDetail }))
+  // Routed by name rather than served flat, so the protected and unprotected
+  // cases are both reachable — they are different screens, not different data.
+  await page.route('**/api/workloads/**', (r) =>
+    r.fulfill({ json: r.request().url().includes('/legacy') ? unprotectedDetail : workloadDetail }),
+  )
   await page.route('**/api/simulate', (r) => r.fulfill({ json: verdict }))
 }

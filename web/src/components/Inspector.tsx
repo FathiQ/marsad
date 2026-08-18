@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowRight, ChevronRight, FileCode2, X } from 'lucide-react'
+import { ArrowRight, ChevronRight, FileCode2, FileX2, ShieldOff, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import {
@@ -69,13 +69,49 @@ function AllowCard({ allow }: { allow: Allow }) {
   )
 }
 
-function EffectiveSection({ title, eff }: { title: string; eff: Effective }) {
+/**
+ * What the absence of a policy permits, written in the same shape as a rule.
+ *
+ * The temptation is a grey sentence saying "nothing applies here", which is
+ * what this used to be. But "everything, from anywhere, on every port" is not
+ * the absence of an answer — it is a permission as real as any rule, and the
+ * only difference is that nobody wrote it down. Rendering it as a rule card
+ * puts it on the same footing as the rules above it, and the deciding line says
+ * plainly who decided: not a policy, Kubernetes.
+ */
+function ExposureCard({ direction }: { direction: 'ingress' | 'egress' }) {
+  const peer = direction === 'ingress' ? 'from anywhere' : 'to anywhere'
+  return (
+    <div className="rounded-lg border border-danger/40 bg-danger/5 p-3">
+      <p className="flex items-baseline gap-2 text-[12.5px] font-medium text-danger">
+        <span aria-hidden="true">{direction === 'ingress' ? '↙' : '↗'}</span>
+        <span className="font-mono">any port</span>
+        <span className="font-normal">{peer}</span>
+      </p>
+      <p className="mt-2.5 border-t border-dashed border-danger/25 pt-2.5 text-[11px] text-muted">
+        decided by: <span className="text-danger">no rule — Kubernetes default</span>
+      </p>
+    </div>
+  )
+}
+
+function EffectiveSection({
+  title,
+  eff,
+  direction,
+}: {
+  title: string
+  eff: Effective
+  direction: 'ingress' | 'egress'
+}) {
   if (!eff.isolated) {
     return (
       <Section title={title}>
-        <p className="text-[12.5px] text-faint">
-          No policy applies {title.toLowerCase()} rules here, so everything is allowed by default.
-        </p>
+        <div className="flex items-center gap-2">
+          <Badge tone="danger">not isolated</Badge>
+          <span className="text-[11.5px] text-muted">no policy applies {direction} rules</span>
+        </div>
+        <ExposureCard direction={direction} />
       </Section>
     )
   }
@@ -180,15 +216,35 @@ function EdgeBody({ edge, nodesById }: { edge: GraphEdge; nodesById: Map<string,
 
 function WorkloadBody({ detail }: { detail: WorkloadDetail }) {
   const { workload, isolation, policies } = detail
+  // Not "has no rules" — no policy selects it in either direction, which is the
+  // one posture Kubernetes answers with a blanket allow.
+  const unprotected = !isolation.ingress && !isolation.egress
+
   return (
     <div className="space-y-6">
+      {unprotected && (
+        <div className="flex gap-2.5 rounded-lg border border-danger/40 bg-danger/10 p-3">
+          <ShieldOff className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
+          <div className="min-w-0">
+            <p className="text-[12.5px] font-semibold text-danger">
+              No policy selects this workload, so Kubernetes allows everything to and from it
+            </p>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+              Every port, from any source in the cluster or outside it, and out to anywhere. This is
+              the default, not a decision — nothing has been written down about this workload at
+              all.
+            </p>
+          </div>
+        </div>
+      )}
+
       <Section title="Posture">
         <div className="flex flex-wrap gap-1.5">
           <Badge tone={isolation.ingress ? 'ok' : 'danger'}>
-            ingress {isolation.ingress ? 'isolated' : 'open'}
+            ingress {isolation.ingress ? 'isolated' : 'not isolated'}
           </Badge>
           <Badge tone={isolation.egress ? 'ok' : 'danger'}>
-            egress {isolation.egress ? 'isolated' : 'open'}
+            egress {isolation.egress ? 'isolated' : 'not isolated'}
           </Badge>
         </div>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[12.5px]">
@@ -220,16 +276,26 @@ function WorkloadBody({ detail }: { detail: WorkloadDetail }) {
       </Section>
 
       <Separator />
-      <EffectiveSection title="Ingress" eff={detail.ingress} />
+      <EffectiveSection title="Ingress" eff={detail.ingress} direction="ingress" />
       <Separator />
-      <EffectiveSection title="Egress" eff={detail.egress} />
+      <EffectiveSection title="Egress" eff={detail.egress} direction="egress" />
       <Separator />
 
       <Section title={`Applied policies (${policies?.length ?? 0})`}>
         {!policies?.length ? (
-          <p className="text-[12.5px] text-faint">
-            No policy selects this workload. It is reachable from anywhere and can reach anywhere.
-          </p>
+          // A real empty state, not a sentence in the gap where a list would be.
+          // Zero applied policies is the whole finding on this screen, and the
+          // question it immediately raises — "then which policy nearly matched,
+          // and why didn't it?" — is what the closest-misses list will answer.
+          <div className="rounded-lg border border-dashed border-line bg-bg px-3 py-5 text-center">
+            <FileX2 className="mx-auto size-5 text-faint" aria-hidden="true" />
+            <p className="mt-2 text-[12.5px] font-medium text-fg">Nothing selects this workload</p>
+            <p className="mx-auto mt-1 max-w-[38ch] text-[11.5px] leading-relaxed text-muted">
+              No NetworkPolicy or ApplicationNetworkPolicy has a{' '}
+              <code className="font-mono text-[11px]">podSelector</code> matching its labels, in
+              either direction.
+            </p>
+          </div>
         ) : (
           <div className="space-y-2">
             {policies.map((p) => (
