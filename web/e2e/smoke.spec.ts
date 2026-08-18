@@ -177,44 +177,120 @@ test('switches aggregation level', async ({ page }) => {
   await expect(workload).toHaveAttribute('data-state', 'on')
 })
 
-test('filters hide elements and say how many', async ({ page }) => {
+test('the rail states what is hidden, and what is not', async ({ page }) => {
   // Hiding without saying so leaves someone wondering where their workloads
-  // went, so the count and a reset are part of the contract.
-  await page.getByText('Only unprotected').click()
-  await expect(page.getByText(/\d+ hidden/)).toBeVisible()
+  // went — but so does saying nothing when nothing is hidden. The footer is
+  // always present and states both cases.
+  await expect(page.getByText(/Nothing hidden/)).toBeVisible()
+  await expect(page.getByText(/\d+ of \d+ workloads/)).toBeVisible()
 
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await page.getByText('Only unprotected').click()
+
+  await expect(page.getByText(/Filters are hiding part of this/)).toBeVisible()
   await page.getByRole('button', { name: 'reset' }).click()
-  await expect(page.getByText(/\d+ hidden/)).toBeHidden()
+  await expect(page.getByText(/Nothing hidden/)).toBeVisible()
 })
 
-test('the legend opens on screen and explains that motion means permitted', async ({ page }) => {
+test('the filters badge lights only when something is actually hidden', async ({ page }) => {
+  // A badge that is always on is decoration. The one thing it has to be able to
+  // say is "part of the picture is missing", which it cannot say if it looks
+  // identical when nothing is.
+  const badge = page.getByText('hiding', { exact: true })
+  await expect(badge).toBeHidden()
+
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await page.getByText('Only unprotected').click()
+  await expect(badge).toBeVisible()
+})
+
+test('each connection toggle says what turning it off would cost', async ({ page }) => {
+  // A checkbox alone does not distinguish hiding four edges from hiding sixty.
+  await page.getByRole('button', { name: 'Filters' }).click()
+
+  const allowed = page.getByText('Allowed by a rule').locator('..')
+  await expect(allowed.getByText(/^\d+$/)).toBeVisible()
+})
+
+test('the legend is always on screen and says motion means permitted', async ({ page }) => {
   // Marsad reads declared policy. Animated edges must not be mistaken for
   // observed traffic, so the legend says which it is.
   //
-  // The viewport assertion matters as much as the text one: the previous
-  // implementation opened 684px above the top of the window, so pressing the
-  // button appeared to do nothing — and this test still passed, because
-  // toBeVisible only requires a non-empty box, not one you can see.
-  await page.getByRole('button', { name: 'Legend' }).click()
+  // It used to be a popover behind a button, which put the key to a picture
+  // made entirely of colour one click away from the picture — and the click had
+  // to be repeated on every visit. The viewport assertion is kept from that
+  // era: the popover once opened 684px above the top of the window, and the old
+  // test still passed, because toBeVisible only requires a non-empty box rather
+  // than one you can see.
+  const bar = page.getByRole('list', { name: 'Legend' })
+  await expect(bar).toBeVisible()
 
-  const panel = page.getByRole('dialog', { name: 'Legend' })
-  await expect(panel).toBeVisible()
-  await expect(panel.getByText(/never observes traffic/)).toBeVisible()
+  for (const label of [
+    'allowed by a rule',
+    'depends on DNS',
+    'allowed by default',
+    'unprotected',
+    'outside the cluster',
+  ]) {
+    await expect(bar.getByText(label, { exact: true })).toBeVisible()
+  }
 
-  const box = await panel.boundingBox()
+  const box = await bar.boundingBox()
   const viewport = page.viewportSize()!
   expect(box).not.toBeNull()
   expect(box!.y).toBeGreaterThanOrEqual(0)
-  expect(box!.x).toBeGreaterThanOrEqual(0)
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height)
-  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+
+  await bar.getByText('allowed by a rule', { exact: true }).hover()
+  await expect(page.getByText(/never observes traffic/)).toBeVisible()
 })
 
-test('escape closes the legend', async ({ page }) => {
-  await page.getByRole('button', { name: 'Legend' }).click()
-  await expect(page.getByRole('dialog', { name: 'Legend' })).toBeVisible()
-  await page.locator('body').press('Escape')
-  await expect(page.getByRole('dialog', { name: 'Legend' })).toBeHidden()
+test('the canvas bar carries the zoom controls', async ({ page }) => {
+  // They did not exist at all before: zooming was a wheel gesture or nothing,
+  // which is unusable on a trackpad-less machine and undiscoverable everywhere.
+  for (const name of ['Zoom in', 'Zoom out', 'Fit to view']) {
+    await expect(page.getByRole('button', { name })).toBeVisible()
+  }
+
+  const before = await settled(page)
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await page.waitForTimeout(600)
+  const after = await settled(page)
+  expect(after.lit).toBeGreaterThan(before.lit)
+})
+
+test('namespaces are ordered worst first, with the empty ones set aside', async ({ page }) => {
+  // Alphabetical order guarantees the thing you are looking for is wherever the
+  // alphabet happens to put it. The rail is read top-down, so the namespaces
+  // with a finding belong at the top — and a namespace with no workloads has no
+  // posture to rank at all, so it is separated rather than sorted last.
+  await page.route('**/api/namespaces', (r) =>
+    r.fulfill({
+      json: [
+        { name: 'aaa-clean', workloads: 5, policies: 3, unprotected: 0 },
+        { name: 'zzz-worst', workloads: 4, policies: 1, unprotected: 3 },
+        { name: 'mmm-some', workloads: 6, policies: 2, unprotected: 1 },
+        { name: 'bbb-empty', workloads: 0, policies: 0, unprotected: 0 },
+      ],
+    }),
+  )
+  await page.reload()
+
+  const rail = page.getByRole('complementary')
+  // Waited for explicitly: reading the list before the refetch lands measures
+  // the order of the previous fixture, and passes or fails on timing.
+  await expect(rail.getByRole('button', { name: /zzz-worst/ })).toBeVisible()
+
+  const order = await rail.getByRole('button', { name: /-(clean|worst|some)/ }).allInnerTexts()
+  const rank = (needle: string) => order.findIndex((t) => t.includes(needle))
+
+  expect(rank('zzz-worst')).toBe(0)
+  expect(rank('mmm-some')).toBe(1)
+  expect(rank('aaa-clean')).toBe(2)
+
+  // Not in the ranked list, and behind a disclosure that counts them.
+  await expect(rail.getByText('with no workloads')).toBeVisible()
+  await expect(rail.getByRole('button', { name: /bbb-empty/ })).toBeHidden()
 })
 
 test('namespace filter is selectable from the rail', async ({ page }) => {

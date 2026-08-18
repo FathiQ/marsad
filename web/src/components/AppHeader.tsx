@@ -1,6 +1,7 @@
-import { Moon, Route, Search, Sun, Wifi, WifiOff } from 'lucide-react'
+import { Moon, Route, Search, ShieldCheck, Sun, Wifi, WifiOff } from 'lucide-react'
 
 import type { Capability, Meta } from '../api'
+import { cn } from '../lib/cn'
 import { Mark } from './Mark'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -12,24 +13,76 @@ interface Props {
   meta: Meta | null
   connected: boolean
   unprotected: number
+  onlyUnprotected: boolean
+  onToggleUnprotected: () => void
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   onOpenSearch: () => void
   onOpenSimulate: () => void
 }
 
-function Stat({ value, label, tone }: { value: number; label: string; tone?: 'danger' }) {
+/**
+ * The one number the header is for.
+ *
+ * Four equal counts — namespaces, workloads, policies, unprotected — gave the
+ * finding the same weight as the inventory, and a viewer scanning the bar had
+ * to read all four to learn whether anything was wrong. Only one of them is a
+ * question; the rest are context, and they read as context now.
+ *
+ * It is also a control. Being told 3 workloads are unprotected and then having
+ * to go find them in the rail is a gap the header can simply close.
+ */
+function PostureChip({
+  unprotected,
+  workloads,
+  active,
+  onToggle,
+}: {
+  unprotected: number
+  workloads: number
+  active: boolean
+  onToggle: () => void
+}) {
+  const clear = unprotected === 0
   return (
-    <div className="flex items-baseline gap-1.5 px-3 py-1">
-      <span
-        className={`num text-[13px] font-semibold ${tone === 'danger' ? 'text-danger' : 'text-fg'}`}
+    <Tooltip
+      content={
+        clear
+          ? 'Every workload is selected by at least one policy. That is not the same as being well protected, but nothing is wide open by default.'
+          : active
+            ? 'Showing only these. Click to show everything again.'
+            : 'Workloads no policy selects at all — reachable from anywhere, and able to reach anywhere. Click to show only these.'
+      }
+    >
+      <button
+        onClick={onToggle}
+        aria-pressed={active}
+        disabled={clear}
+        className={cn(
+          'flex items-baseline gap-1.5 rounded-lg border px-2.5 py-1 transition-colors',
+          'outline-none focus-visible:ring-2 focus-visible:ring-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+          clear
+            ? 'cursor-default border-line bg-surface'
+            : active
+              ? 'border-danger bg-danger/20'
+              : 'border-danger/40 bg-danger/10 hover:bg-danger/20',
+        )}
       >
-        {value}
-      </span>
-      <span className={`text-[11.5px] ${tone === 'danger' ? 'text-danger' : 'text-faint'}`}>
-        {label}
-      </span>
-    </div>
+        {clear ? (
+          <>
+            <ShieldCheck className="size-3.5 self-center text-allowed" />
+            <span className="text-[12px] text-muted">nothing unprotected</span>
+          </>
+        ) : (
+          <>
+            <span className="num text-[13px] font-semibold text-danger">{unprotected}</span>
+            <span className="text-[12px] text-danger">
+              unprotected of <span className="num">{workloads}</span> workloads
+            </span>
+          </>
+        )}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -50,6 +103,8 @@ export function AppHeader({
   meta,
   connected,
   unprotected,
+  onlyUnprotected,
+  onToggleUnprotected,
   theme,
   onToggleTheme,
   onOpenSearch,
@@ -74,9 +129,17 @@ export function AppHeader({
 
       <Separator orientation="vertical" className="h-5" />
 
-      <span className="hidden text-[11.5px] text-faint lg:block">
-        the observatory for your Kubernetes network policies
-      </span>
+      {/* The inventory, demoted. It is what the cluster contains, not what is
+          wrong with it, and the tagline that used to sit here belongs on the
+          splash — by the time this bar is on screen, nobody needs telling what
+          they opened. */}
+      {meta && (
+        <span className="hidden text-[11.5px] text-text-dim md:block">
+          <span className="num">{meta.counts.namespaces}</span> namespaces
+          <span className="px-1.5 opacity-50">·</span>
+          <span className="num">{meta.counts.policies}</span> policies
+        </span>
+      )}
 
       <div className="flex-1" />
 
@@ -98,18 +161,12 @@ export function AppHeader({
       </Button>
 
       {meta && (
-        <div className="hidden items-center divide-x divide-line overflow-hidden rounded-lg border border-line bg-bg md:flex">
-          <Stat value={meta.counts.namespaces} label="namespaces" />
-          <Stat value={meta.counts.workloads} label="workloads" />
-          <Stat value={meta.counts.policies} label="policies" />
-          {unprotected > 0 && (
-            <Tooltip content="Workloads no policy selects at all — reachable from anywhere, and able to reach anywhere.">
-              <div className="bg-danger/10">
-                <Stat value={unprotected} label="unprotected" tone="danger" />
-              </div>
-            </Tooltip>
-          )}
-        </div>
+        <PostureChip
+          unprotected={unprotected}
+          workloads={meta.counts.workloads}
+          active={onlyUnprotected}
+          onToggle={onToggleUnprotected}
+        />
       )}
 
       {unavailable.map((c) => (

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type MutableRefObject } from 'react'
 import Graph from 'graphology'
 import Sigma from 'sigma'
 
@@ -6,6 +6,20 @@ import type { Graph as GraphData, GraphEdge, GraphNode } from '../api'
 import { OverlayRenderer } from '../graph/overlay'
 import type { NamespacePalette } from '../graph/style'
 import type { LayoutResult } from '../graph/layout.worker'
+
+/**
+ * The camera, for the controls that live outside this component.
+ *
+ * Handed out through a ref rather than driven by props, because zooming is an
+ * event and not a state: a `zoom` prop would make the parent responsible for
+ * tracking a number that Sigma already owns and animates.
+ */
+export interface GraphControls {
+  zoomIn: () => void
+  zoomOut: () => void
+  /** Back to the framing the fit chose, not to Sigma's arbitrary default. */
+  fit: () => void
+}
 
 interface Props {
   data: GraphData
@@ -20,6 +34,8 @@ interface Props {
    * the stream pushing a new graph, and it is the difference between reframing
    * being helpful and it being the camera moving on its own. */
   viewToken: string
+  /** Populated with the camera controls once the renderer exists. */
+  controls?: MutableRefObject<GraphControls | null>
   onSelectNode: (node: GraphNode) => void
   onSelectEdge: (edge: GraphEdge) => void
   onClearSelection: () => void
@@ -44,6 +60,7 @@ export function GraphCanvas({
   selectedId,
   focusId,
   viewToken,
+  controls,
   onSelectNode,
   onSelectEdge,
   onClearSelection,
@@ -64,6 +81,10 @@ export function GraphCanvas({
    * is theirs: workloads coming and going must not drag it away from what they
    * are looking at. Cleared when they ask to see something different. */
   const userMoved = useRef(false)
+  /** The framing the fit last computed, so "fit" can return to it rather than
+   * to Sigma's default of ratio 1 — which on a small graph is a magnification
+   * nobody asked for. */
+  const lastFit = useRef<{ x: number; y: number; ratio: number } | null>(null)
 
   useEffect(() => {
     if (!container.current || !canvas.current) return
@@ -85,6 +106,27 @@ export function GraphCanvas({
     overlay.current = over
     over.resize()
     over.start()
+
+    if (controls) {
+      // Zooming by button is the user aiming the camera just as much as a wheel
+      // gesture is, so it claims the view the same way.
+      controls.current = {
+        zoomIn: () => {
+          userMoved.current = true
+          renderer.getCamera().animatedZoom({ duration: 220 })
+        },
+        zoomOut: () => {
+          userMoved.current = true
+          renderer.getCamera().animatedUnzoom({ duration: 220 })
+        },
+        fit: () => {
+          userMoved.current = false
+          const to = lastFit.current
+          if (to) renderer.getCamera().animate(to, { duration: 320 })
+          else renderer.getCamera().animatedReset({ duration: 320 })
+        },
+      }
+    }
 
     renderer.on('afterRender', () => over.resize())
 
@@ -238,15 +280,8 @@ export function GraphCanvas({
       // a level switch, a workload appearing — not when the same graph arrived
       // again.
       const signature = data.nodes.map((n) => n.id).join(' ')
-      if (signature === fitted.current) return
+      const alreadyFitted = signature === fitted.current
       fitted.current = signature
-
-      // Past here the node set really did change — but if the user has aimed
-      // the camera themselves, the view is theirs. A Job finishing or a
-      // Deployment scaling changes the set without being any reason to pull
-      // them away from what they were reading. Asking to see something
-      // different clears this, and reframes.
-      if (userMoved.current) return
 
       // Fit to what is drawn, not to where the nodes are. Sigma frames the node
       // *positions*, which for card nodes leaves half a card hanging off each
@@ -276,7 +311,19 @@ export function GraphCanvas({
       const viewport = box ? Math.min(box.clientWidth, box.clientHeight) : 0
       if (span > 0 && viewport > 0) ratio = Math.max(ratio, viewport / span)
 
-      renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio }, { duration: 340 })
+      // Recorded even when the camera is not moved, so the fit button has
+      // somewhere to return to. That is the whole reason this is computed
+      // before the two bail-outs below rather than after them.
+      lastFit.current = { x: 0.5, y: 0.5, ratio }
+
+      // The node set has to have changed for a reframe to be warranted, and the
+      // user must not have aimed the camera themselves. A Job finishing or a
+      // Deployment scaling changes the set without being any reason to pull
+      // someone away from what they were reading; asking to see something
+      // different clears userMoved, and reframes.
+      if (alreadyFitted || userMoved.current) return
+
+      renderer.getCamera().animate(lastFit.current, { duration: 340 })
     }
 
     w.postMessage({

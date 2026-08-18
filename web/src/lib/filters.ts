@@ -85,3 +85,52 @@ export function applyFilters(graph: Graph, filters: Filters): Graph {
 export function hiddenCount(original: Graph, filtered: Graph): number {
   return original.nodes.length - filtered.nodes.length
 }
+
+/**
+ * How many edges of each kind the unfiltered graph holds.
+ *
+ * Shown beside each connection toggle so the cost of turning one off is visible
+ * before it is paid. "Allowed by a rule" with 4 beside it and "depends on DNS"
+ * with 61 are very different decisions, and a checkbox alone says neither.
+ *
+ * `default` can be absent rather than zero: those edges are omitted by the
+ * server when includeDefault is off, so the graph in hand genuinely does not
+ * know how many there would be. Zero would be a lie, and on this screen a
+ * confident wrong number is worse than no number.
+ */
+export function edgeKindCounts(
+  graph: Graph | null,
+  includeDefault: boolean,
+): Partial<Record<EdgeKind, number>> {
+  const counts: Partial<Record<EdgeKind, number>> = { allowed: 0, approximate: 0 }
+  if (includeDefault) counts.default = 0
+  for (const e of graph?.edges ?? []) {
+    if (e.kind === 'default' && !includeDefault) continue
+    counts[e.kind] = (counts[e.kind] ?? 0) + 1
+  }
+  return counts
+}
+
+/** Workloads drawn versus workloads the graph holds, for the rail's footer. */
+export function workloadCounts(original: Graph | null, filtered: Graph | null) {
+  const count = (g: Graph | null) => (g?.nodes ?? []).filter((n) => n.kind === 'workload').length
+  return { shown: count(filtered), total: count(original) }
+}
+
+/**
+ * Whether the filters are actually hiding anything.
+ *
+ * Drives the badge on the collapsed row. A badge that is always lit is
+ * decoration, and worse than decoration here: the one thing it has to be able
+ * to say is "part of the picture is missing", and it cannot say that if it
+ * looks the same when nothing is.
+ */
+export function isHiding(
+  original: Graph | null,
+  filtered: Graph | null,
+  includeDefault: boolean,
+): boolean {
+  if (!includeDefault) return true
+  if (!original || !filtered) return false
+  return filtered.nodes.length < original.nodes.length || filtered.edges.length < original.edges.length
+}
