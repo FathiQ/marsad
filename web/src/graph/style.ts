@@ -1,58 +1,88 @@
 import type { GraphEdge, GraphNode } from '../api'
 
 /**
- * The canvas palette, mirroring the CSS tokens in hex.
+ * The canvas palette, read from the CSS tokens rather than restated here.
  *
- * This duplication is deliberate and unavoidable. Sigma's WebGL colour parser
- * understands hex and rgb() only — it does not understand oklch(), and it falls
- * back to black *silently* rather than erroring, which reads as a design choice
- * rather than a bug. Reading the CSS variables would therefore paint every node
- * and edge black. The chrome keeps its oklch tokens, where Tailwind and the
- * browser handle them properly, and the canvas gets converted values here.
+ * This used to be a hand-converted second copy of the `:root` table, because
+ * Sigma's WebGL colour parser understands hex and rgb() only — it does not
+ * understand oklch(), and it falls back to black *silently* rather than
+ * erroring, which reads as a design choice rather than a bug.
  *
- * Kept adjacent to `:root` in styles.css: if one moves, move the other.
+ * The copy is what let `--node-world` and `--danger` drift into being the same
+ * colour in two files at once: fixing one file would have left the canvas — the
+ * only place world nodes are actually drawn — still wrong. So styles.css is
+ * authored in hex now, and this reads it. One table, one place to change it,
+ * and the WCAG test in internal/theme governs what the canvas paints too.
  */
-const CANVAS_PALETTE = {
-  dark: {
-    fg: oklch(0.96, 0.006, 265),
-    muted: oklch(0.72, 0.02, 265),
-    faint: oklch(0.57, 0.022, 265),
-    canvas: oklch(0.174, 0.016, 265),
-    accent: oklch(0.68, 0.17, 255),
-    allowed: oklch(0.76, 0.17, 155),
-    neutralEdge: oklch(0.6, 0.025, 265),
-    approx: oklch(0.79, 0.15, 78),
-    danger: oklch(0.68, 0.19, 22),
-    domain: oklch(0.72, 0.17, 305),
-    cidr: oklch(0.75, 0.16, 55),
-    world: oklch(0.68, 0.19, 22),
-    picto: oklch(0.18, 0.015, 265),
-    plate: oklch(0.245, 0.019, 265),
-    plateEdge: oklch(0.37, 0.02, 265),
-  },
-  light: {
-    fg: oklch(0.22, 0.02, 265),
-    muted: oklch(0.47, 0.02, 265),
-    faint: oklch(0.63, 0.018, 265),
-    canvas: oklch(0.995, 0.001, 265),
-    accent: oklch(0.55, 0.2, 258),
-    allowed: oklch(0.58, 0.15, 155),
-    neutralEdge: oklch(0.7, 0.015, 265),
-    approx: oklch(0.62, 0.14, 65),
-    danger: oklch(0.56, 0.2, 25),
-    domain: oklch(0.55, 0.19, 300),
-    cidr: oklch(0.62, 0.16, 50),
-    world: oklch(0.56, 0.2, 25),
-    picto: oklch(0.99, 0, 0),
-    plate: oklch(1, 0, 0),
-    plateEdge: oklch(0.84, 0.008, 265),
-  },
+const CANVAS_TOKENS = {
+  fg: '--fg',
+  muted: '--muted',
+  faint: '--faint',
+  canvas: '--canvas',
+  accent: '--accent',
+  allowed: '--allowed',
+  neutralEdge: '--neutral-edge',
+  approx: '--approx',
+  danger: '--danger',
+  domain: '--node-domain',
+  cidr: '--node-cidr',
+  world: '--node-world',
+  picto: '--picto',
+  plate: '--card-plate',
+  plateEdge: '--line-strong',
 } as const
 
-export type CanvasColour = keyof typeof CANVAS_PALETTE.dark
+export type CanvasColour = keyof typeof CANVAS_TOKENS
 
+/**
+ * The canvas font stacks, matching --font-sans and --font-mono in styles.css.
+ *
+ * Restated rather than read, because a Canvas2D `font` string is parsed by the
+ * CSS font shorthand grammar and cannot take a var(). They must stay in step
+ * with the tokens: card widths are measured with one of these strings and drawn
+ * with another, so a mismatch is a layout bug, not a cosmetic one.
+ */
+export const SANS_STACK = `'Inter', ui-sans-serif, system-ui, sans-serif`
+export const MONO_STACK = `'JetBrains Mono', ui-monospace, SFMono-Regular, monospace`
+
+/**
+ * Unmistakably not a design choice.
+ *
+ * The whole reason this file existed as a duplicate was that a colour Sigma
+ * cannot parse disappears into black, which looks deliberate. If a token ever
+ * fails to resolve, it should look like the bug it is.
+ */
+const UNRESOLVED = '#ff00ff'
+
+let cache: Record<CanvasColour, string> | null = null
+let cachedFor: string | null = null
+
+/** Which palette is live: an explicit choice, or what the OS asked for. */
+function themeKey(): string {
+  const chosen = document.documentElement.dataset.theme
+  if (chosen === 'light' || chosen === 'dark') return chosen
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+/**
+ * Resolved once per theme, not per call.
+ *
+ * paint() sits inside the per-card and per-edge draw loops, and getComputedStyle
+ * forces a style recalculation. Resolving the whole table on the first call
+ * after a theme change keeps that cost to once per repaint of the graph.
+ */
 export function paint(name: CanvasColour): string {
-  return CANVAS_PALETTE[isLight() ? 'light' : 'dark'][name]
+  const key = themeKey()
+  if (cache === null || cachedFor !== key) {
+    const style = getComputedStyle(document.documentElement)
+    const next = {} as Record<CanvasColour, string>
+    for (const [token, property] of Object.entries(CANVAS_TOKENS)) {
+      next[token as CanvasColour] = style.getPropertyValue(property).trim() || UNRESOLVED
+    }
+    cache = next
+    cachedFor = key
+  }
+  return cache[name]
 }
 
 /* ------------------------------------------------------------------ colour */
@@ -86,7 +116,7 @@ export function hueFor(palette: NamespacePalette, name: string): number {
 }
 
 function isLight(): boolean {
-  return document.documentElement.dataset.theme === 'light'
+  return themeKey() === 'light'
 }
 
 /**

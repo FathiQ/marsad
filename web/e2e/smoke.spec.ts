@@ -78,6 +78,99 @@ test('toggles between dark and light', async ({ page }) => {
   await expect(html).toHaveAttribute('data-theme', 'light')
 })
 
+test('a chosen theme survives a reload', async ({ page }) => {
+  await page.getByLabel('Toggle theme').click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+  await page.reload()
+  // Asserted before anything else can settle: the theme is applied by an inline
+  // script in the document head precisely so it is right on the first frame,
+  // and a light-theme user should never watch the page flash dark.
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+})
+
+test('the two signal colours that used to be identical are not', async ({ page }) => {
+  // --node-world and --danger were the same red, so "reaches outside the
+  // cluster" and "no policy protects this" were indistinguishable. The Go test
+  // guards the stylesheet; this guards what a browser actually resolves, which
+  // is what the canvas paints.
+  const colours = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    return {
+      world: style.getPropertyValue('--node-world').trim(),
+      danger: style.getPropertyValue('--danger').trim(),
+      cidr: style.getPropertyValue('--node-cidr').trim(),
+    }
+  })
+
+  expect(colours.world).not.toBe('')
+  expect(colours.world).not.toBe(colours.danger)
+  expect(colours.world).not.toBe(colours.cidr)
+})
+
+test('the canvas palette resolves from the stylesheet, not a stale copy', async ({ page }) => {
+  // graph/style.ts used to restate the token table in hex for Sigma's benefit,
+  // which is how the two files came to disagree. It reads the variables now, and
+  // an unresolved token paints magenta rather than disappearing into black.
+  const painted = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    return ['--fg', '--danger', '--node-world', '--card-plate', '--picto'].map((t) =>
+      style.getPropertyValue(t).trim(),
+    )
+  })
+
+  for (const colour of painted) {
+    expect(colour).toMatch(/^#[0-9a-f]{6}$/i)
+    expect(colour.toLowerCase()).not.toBe('#ff00ff')
+  }
+})
+
+test('renders in Inter and JetBrains Mono, not a silent system fallback', async ({ page }) => {
+  // 'Inter var' sat in the font stack for months without ever being loaded, so
+  // the UI rendered in system-ui and nobody could tell from the CSS.
+  await page.waitForFunction(() => document.fonts.status === 'loaded')
+
+  const loaded = await page.evaluate(() => ({
+    inter: document.fonts.check('16px Inter'),
+    mono: document.fonts.check('16px "JetBrains Mono"'),
+  }))
+
+  expect(loaded.inter).toBe(true)
+  expect(loaded.mono).toBe(true)
+})
+
+test.describe('with an operating system asking for light', () => {
+  test.use({ colorScheme: 'light' })
+
+  test('follows it when nobody has chosen a theme', async ({ page }) => {
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  })
+
+  test('but a stored choice wins', async ({ page }) => {
+    // Someone who deliberately picked dark on a light machine meant it.
+    await page.addInitScript(() => window.localStorage.setItem('marsad.theme', 'dark'))
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  })
+
+  test('the light theme is readable, not dark tokens on a white ground', async ({ page }) => {
+    await page.reload()
+    const { bg, fg } = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement)
+      return {
+        bg: style.getPropertyValue('--bg').trim(),
+        fg: style.getPropertyValue('--fg').trim(),
+      }
+    })
+    // The classic failure is a theme whose colours are defined only inside a
+    // [data-theme] block, so the un-stamped state renders one theme's text on
+    // the other's ground.
+    expect(bg.toLowerCase()).toBe('#f6f8fa')
+    expect(fg.toLowerCase()).toBe('#111620')
+  })
+})
+
 test('switches aggregation level', async ({ page }) => {
   const workload = page.getByRole('radio', { name: 'Workload' })
   await workload.click()
