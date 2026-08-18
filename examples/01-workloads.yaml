@@ -67,3 +67,40 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+---
+# The one nothing protects.
+#
+# marsad-demo-edge has a policy — web-allow-egress-to-api, in
+# 11-allow-web-to-api.yaml — but it selects `app: web`, and this is
+# `app: worker`. So nothing selects this pod at all, and Kubernetes therefore
+# permits everything to and from it: any port, from anywhere, to anywhere.
+#
+# That is the realistic shape of the failure. A namespace with no policies at
+# all is obvious to everyone; a namespace that *looks* covered, holding one
+# workload deployed after the rules were written and never added to them, is
+# what actually reaches production. It is also the demo's whole point — without
+# it the headline "N unprotected" only ever counts kube-system, which nobody
+# reads as a finding about their own cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: marsad-demo-edge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        tier: edge
+    spec:
+      containers:
+        - name: worker
+          image: registry.k8s.io/e2e-test-images/agnhost:2.47
+          args: ["netexec", "--http-port=9090"]
+          ports:
+            - name: metrics
+              containerPort: 9090
