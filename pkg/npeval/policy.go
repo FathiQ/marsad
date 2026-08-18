@@ -1,8 +1,10 @@
 package npeval
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
+	"strings"
 )
 
 // PolicyTypes is a bitmask of the directions a policy governs.
@@ -36,6 +38,33 @@ func (t PolicyTypes) String() string {
 	default:
 		return ""
 	}
+}
+
+// MarshalJSON encodes the directions by name rather than as a bitmask, for the
+// same reason Result and Reason do: a client should not have to know that
+// egress happens to be the second bit set.
+func (t PolicyTypes) MarshalJSON() ([]byte, error) { return json.Marshal(t.String()) }
+
+// UnmarshalJSON accepts the name form, so a policy survives a round trip.
+func (t *PolicyTypes) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	var out PolicyTypes
+	for _, part := range strings.Split(s, ",") {
+		switch strings.TrimSpace(part) {
+		case "Ingress":
+			out |= TypeIngress
+		case "Egress":
+			out |= TypeEgress
+		case "":
+		default:
+			return fmt.Errorf("unknown policy type %q", part)
+		}
+	}
+	*t = out
+	return nil
 }
 
 // RuleID names one rule within one policy. It is stable across evaluations of an

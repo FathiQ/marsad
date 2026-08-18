@@ -423,6 +423,7 @@ export default function App() {
                   setSelectedNode(null)
                   setSelectedEdge(null)
                 }}
+                onSimulate={() => setSimulateOpen(true)}
               />
             </div>
 

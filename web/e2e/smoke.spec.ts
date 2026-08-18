@@ -52,12 +52,12 @@ test('selecting from the palette opens the inspector with the policy YAML', asyn
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
   await expect(inspector).toBeVisible()
-  await expect(inspector.getByText('ingress isolated')).toBeVisible()
+  await expect(inspector.getByText(/Ingress — isolated/)).toBeVisible()
 
   // Traceability: the policy is listed and its original YAML is available
-  // read-only. Exact match, because the policy name also appears inside the
-  // rule identifier on the effective-rules list — which is itself the point.
-  await inspector.getByText('api-ingress', { exact: true }).click()
+  // read-only. Scoped to the list entry, because the name deliberately appears
+  // twice — once as the chip naming the rule's deciding policy, once here.
+  await inspector.locator('summary').filter({ hasText: 'api-ingress' }).click()
   await expect(inspector.locator('pre')).toContainText('podSelector')
 })
 
@@ -768,8 +768,8 @@ test('the inspector explains an unprotected workload rather than leaving a blank
   ).toBeVisible()
 
   // Both directions, named the way the evaluator names them.
-  await expect(inspector.getByText('ingress not isolated')).toBeVisible()
-  await expect(inspector.getByText('egress not isolated')).toBeVisible()
+  await expect(inspector.getByText(/Ingress — not isolated/)).toBeVisible()
+  await expect(inspector.getByText(/Egress — not isolated/)).toBeVisible()
 
   // The exposure is rendered as rules, with the thing that decided them.
   // Exact, because the banner's prose above also ends "and out to anywhere".
@@ -782,6 +782,88 @@ test('the inspector explains an unprotected workload rather than leaving a blank
   await expect(inspector.getByText('Nothing selects this workload')).toBeVisible()
 })
 
+test('the empty state names the policies that nearly matched, and why', async ({ page }) => {
+  // The single most useful thing on this screen. "No policy selects this" is a
+  // fact; which policy was *supposed* to is the question, and answering it by
+  // hand means opening every policy in the namespace and comparing selectors.
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByRole('option', { name: /legacy/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector.getByText('default-deny')).toBeVisible()
+
+  // The whole selector is printed only when it says more than the failed clause
+  // does. default-deny is a single clause, so it is not repeated; allow-api-to-db
+  // has two, one of which the workload satisfies, so the full selector earns
+  // its line.
+  await expect(inspector.getByText('app in (api,db)')).toBeHidden()
+  await expect(inspector.getByText('app=api,tier=core')).toBeVisible()
+
+  // Both halves: the clause that failed, and what the workload has instead.
+  await expect(inspector.getByText('app in (api, db)')).toBeVisible()
+  await expect(inspector.getByText(/this workload has\s*app=legacy/).first()).toBeVisible()
+
+  // A clause failing because the label is absent reads differently from one
+  // failing on its value — one is a typo in the policy, the other in the pod.
+  await expect(inspector.getByText(/this workload has no\s*tier\s*label/)).toBeVisible()
+
+  // Nearest first.
+  const order = await inspector.getByText(/^(default-deny|allow-api-to-db)$/).allInnerTexts()
+  expect(order[0]).toBe('default-deny')
+})
+
+test('a rule names the policy that decided it, and opens its YAML', async ({ page }) => {
+  // The rule identifier is precise and unreadable, and the precision only
+  // matters once you have already found the policy.
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector.getByText('decided by').first()).toBeVisible()
+
+  const chip = inspector.getByRole('button', { name: 'Show the YAML of api-ingress' })
+  await expect(chip).toBeVisible()
+  await chip.click()
+
+  await expect(inspector.locator('pre')).toContainText('podSelector')
+})
+
+test('directions are named for what they do, with their isolation', async ({ page }) => {
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(inspector.getByText('Accepts')).toBeVisible()
+  await expect(inspector.getByText('Reaches')).toBeVisible()
+  await expect(inspector.getByText(/Ingress — isolated/)).toBeVisible()
+  await expect(inspector.getByText(/1 policy selects it/).first()).toBeVisible()
+})
+
+test('an approximate rule carries its reason where the rule is', async ({ page }) => {
+  // Not a footnote: the uncertainty belongs to this rule, and a reader deciding
+  // whether to trust it should not have to go looking.
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+  await expect(
+    inspector.getByText(/Marsad does not resolve DNS, so it cannot confirm/),
+  ).toBeVisible()
+})
+
+test('the inspector offers to simulate from what it is describing', async ({ page }) => {
+  await page.locator('body').press('/')
+  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByRole('option', { name: /api/ }).first().click()
+
+  await page.getByRole('button', { name: 'Simulate from api' }).click()
+  await expect(page.getByRole('dialog', { name: /Would this connection be allowed/ })).toBeVisible()
+})
+
 test('a protected workload keeps its rules and its policy list', async ({ page }) => {
   // Guards the branch: the unprotected treatment must not leak onto a workload
   // that policies do cover.
@@ -790,7 +872,7 @@ test('a protected workload keeps its rules and its policy list', async ({ page }
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
-  await expect(inspector.getByText('ingress isolated')).toBeVisible()
+  await expect(inspector.getByText(/Ingress — isolated/)).toBeVisible()
   await expect(
     inspector.getByText('No policy selects this workload, so Kubernetes allows everything'),
   ).toBeHidden()

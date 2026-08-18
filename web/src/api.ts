@@ -137,6 +137,38 @@ export interface PolicyView {
   yaml?: string
 }
 
+/** One clause of a podSelector a workload fails, and what it has instead. */
+export interface MissedRequirement {
+  /** The clause as a human reads it: "app=web", "tier in (edge, dmz)". */
+  text: string
+  key: string
+  /** The workload's value for `key`. Absent and empty are different situations,
+   * which `present` distinguishes: one is a typo in the policy, the other a
+   * typo in the workload. */
+  value?: string
+  present: boolean
+}
+
+/** A policy that did not select this workload, and the clauses that stopped it. */
+export interface Miss {
+  policy: ObjectRef
+  provider: string
+  types: string
+  selector: string
+  missed?: MissedRequirement[]
+  /** How many clauses the workload does satisfy, which is what makes one miss
+   * nearer than another. */
+  matched: number
+}
+
+/** Where a rule identifier came from, resolved by the server so the UI never
+ * has to take the identifier apart. */
+export interface RuleRef {
+  policy: ObjectRef
+  provider: string
+  path: string
+}
+
 export interface WorkloadDetail {
   workload: {
     ref: ObjectRef
@@ -154,6 +186,12 @@ export interface WorkloadDetail {
   policies?: PolicyView[]
   ingress: Effective
   egress: Effective
+  /** Every rule identifier in the effective sets above, mapped to the policy
+   * responsible for it. */
+  rules?: Record<string, RuleRef>
+  /** Policies in this namespace that did not select the workload, nearest
+   * first. What the "nothing selects this" state exists to answer. */
+  closestMisses?: Miss[]
 }
 
 /** One half of a simulation: what the source's egress says, or what the

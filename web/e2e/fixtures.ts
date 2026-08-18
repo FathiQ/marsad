@@ -119,7 +119,19 @@ export const workloadDetail = {
     replicas: 3,
     ports: [{ name: 'http', port: 8080, protocol: 'TCP' }],
   },
-  isolation: { ingress: true, egress: true },
+  // Which policies caused the isolation, not just that it exists: the panel
+  // says "Ingress — isolated · 1 policy selects it", and the count comes from
+  // here.
+  isolation: {
+    ingress: true,
+    egress: true,
+    ingressBy: [
+      { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'api-ingress' },
+    ],
+    egressBy: [
+      { group: 'networking.k8s.aws', kind: 'ApplicationNetworkPolicy', namespace: 'prod', name: 'aws-egress' },
+    ],
+  },
   policies: [
     {
       ref: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'api-ingress' },
@@ -145,7 +157,29 @@ export const workloadDetail = {
     workload: { kind: 'Deployment', namespace: 'prod', name: 'api' },
     direction: 1,
     isolated: true,
-    allows: [],
+    allows: [
+      {
+        peer: { kind: 'domain', domain: '*.s3.us-east-1.amazonaws.com', display: '*.s3.us-east-1.amazonaws.com' },
+        ports: [{ protocol: 'TCP', from: 443, to: 443 }],
+        via: ['networking.k8s.aws/ApplicationNetworkPolicy/prod/aws#egress[0]'],
+        approximate: true,
+        note: 'Marsad does not resolve DNS, so it cannot confirm an address is covered by this wildcard.',
+      },
+    ],
+  },
+  // Rule identifiers resolved to the policy responsible, so the UI never has to
+  // take an identifier apart to label a rule.
+  rules: {
+    'networking.k8s.io/NetworkPolicy/prod/api-ingress#ingress[0]': {
+      policy: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'api-ingress' },
+      provider: 'k8s',
+      path: 'spec.ingress[0]',
+    },
+    'networking.k8s.aws/ApplicationNetworkPolicy/prod/aws#egress[0]': {
+      policy: { group: 'networking.k8s.aws', kind: 'ApplicationNetworkPolicy', namespace: 'prod', name: 'aws-egress' },
+      provider: 'aws-anp',
+      path: 'spec.egress[0]',
+    },
   },
 }
 
@@ -179,6 +213,29 @@ export const unprotectedDetail = {
     isolated: false,
     allows: [],
   },
+  // The policies that nearly matched, nearest first — the answer to the
+  // question "nothing selects this" provokes and used to leave hanging.
+  closestMisses: [
+    {
+      policy: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'default-deny' },
+      provider: 'k8s',
+      types: 'Ingress,Egress',
+      selector: 'app in (api,db)',
+      matched: 0,
+      missed: [{ text: 'app in (api, db)', key: 'app', value: 'legacy', present: true }],
+    },
+    {
+      policy: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'allow-api-to-db' },
+      provider: 'k8s',
+      types: 'Ingress',
+      selector: 'app=api,tier=core',
+      matched: 0,
+      missed: [
+        { text: 'app=api', key: 'app', value: 'legacy', present: true },
+        { text: 'tier=core', key: 'tier', present: false },
+      ],
+    },
+  ],
 }
 
 /** A denied connection whose two halves disagree — the case the panel exists
