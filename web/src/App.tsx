@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldOff, Telescope, TriangleAlert } from 'lucide-react'
 
 import {
@@ -15,21 +15,23 @@ import {
   type NamespaceSummary,
 } from './api'
 import { AppHeader } from './components/AppHeader'
+import { CanvasBar } from './components/CanvasBar'
 import { CommandPalette } from './components/CommandPalette'
 import { FilterRail } from './components/FilterRail'
-import { GraphCanvas } from './components/GraphCanvas'
+import { GraphCanvas, type GraphControls } from './components/GraphCanvas'
 import { Inspector } from './components/Inspector'
-import { Legend } from './components/Legend'
 import { Splash } from './components/Splash'
 import { SimulatePanel, type Prefill } from './components/SimulatePanel'
-import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
 import { buildNamespacePalette } from './graph/style'
 import {
   applyFilters,
   defaultFilters,
+  edgeKindCounts,
   hiddenCount,
+  isHiding,
   presentWorkloadKinds,
+  workloadCounts,
   type Filters,
 } from './lib/filters'
 
@@ -243,6 +245,14 @@ export default function App() {
   )
   const hidden = graph && filtered ? hiddenCount(graph, filtered) : 0
   const workloadKinds = useMemo(() => presentWorkloadKinds(graph), [graph])
+  const edgeCounts = useMemo(() => edgeKindCounts(graph, includeDefault), [graph, includeDefault])
+  const counts = useMemo(() => workloadCounts(graph, filtered), [graph, filtered])
+  const hiding = isHiding(graph, filtered, includeDefault)
+  const graphControls = useRef<GraphControls | null>(null)
+
+  const toggleOnlyUnprotected = useCallback(() => {
+    setFilters((f) => ({ ...f, onlyUnprotected: !f.onlyUnprotected }))
+  }, [])
 
   const nodesById = useMemo(
     () => new Map((filtered?.nodes ?? []).map((n) => [n.id, n])),
@@ -306,6 +316,8 @@ export default function App() {
           meta={meta}
           connected={connected}
           unprotected={totalUnprotected}
+          onlyUnprotected={filters.onlyUnprotected}
+          onToggleUnprotected={toggleOnlyUnprotected}
           theme={theme}
           onToggleTheme={() => {
             const next = theme === 'dark' ? 'light' : 'dark'
@@ -336,90 +348,88 @@ export default function App() {
             onFilters={setFilters}
             workloadKinds={workloadKinds}
             palette={palette}
-            hidden={hidden}
+            edgeCounts={edgeCounts}
+            shown={counts.shown}
+            total={counts.total}
+            hiding={hiding}
             onReset={() => {
               setFilters(defaultFilters())
               setIncludeDefault(true)
             }}
           />
 
-          <main className="relative min-w-0 flex-1 overflow-hidden bg-canvas">
-            <div className="canvas-texture pointer-events-none absolute inset-0 opacity-50" />
-            <div className="canvas-vignette pointer-events-none absolute inset-0" />
+          {/* A column, so the bar along the bottom is part of the layout rather
+              than floating over the picture it is describing. */}
+          <main className="flex min-w-0 flex-1 flex-col bg-canvas">
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div className="canvas-texture pointer-events-none absolute inset-0 opacity-50" />
+              <div className="canvas-vignette pointer-events-none absolute inset-0" />
 
-            {filtered && (
-              <GraphCanvas
-                data={filtered}
-                palette={palette}
-                theme={theme}
-                animateFlow={animateFlow}
-                showGroups={showGroups}
-                selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
-                focusId={focusId}
-                viewToken={viewToken}
-                onSelectNode={(n) => {
-                  setSelectedNode(n)
-                  setSelectedEdge(null)
-                }}
-                onSelectEdge={(e) => {
-                  setSelectedEdge(e)
-                  setSelectedNode(null)
-                }}
-                onClearSelection={() => {
+              {filtered && (
+                <GraphCanvas
+                  data={filtered}
+                  palette={palette}
+                  theme={theme}
+                  animateFlow={animateFlow}
+                  showGroups={showGroups}
+                  selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
+                  focusId={focusId}
+                  viewToken={viewToken}
+                  controls={graphControls}
+                  onSelectNode={(n) => {
+                    setSelectedNode(n)
+                    setSelectedEdge(null)
+                  }}
+                  onSelectEdge={(e) => {
+                    setSelectedEdge(e)
+                    setSelectedNode(null)
+                  }}
+                  onClearSelection={() => {
+                    setSelectedNode(null)
+                    setSelectedEdge(null)
+                  }}
+                />
+              )}
+
+              {graph?.truncated && (
+                <div className="glass rim pointer-events-none absolute top-3.5 left-1/2 z-10 -translate-x-1/2 rounded-full border border-warn/40 px-3.5 py-1.5 text-[12px] text-muted">
+                  Some peers matched more workloads than can be drawn and were collapsed to their
+                  namespace.
+                </div>
+              )}
+
+              {error && (
+                <Overlay icon={TriangleAlert} title="Could not reach the API">
+                  <p>{error}</p>
+                  <p className="mt-2 text-faint">Marsad is read-only, so this is safe to retry.</p>
+                </Overlay>
+              )}
+
+              {empty && (
+                <Overlay icon={hidden > 0 ? ShieldOff : Telescope} title="Nothing to draw">
+                  {hidden > 0
+                    ? 'Every node is hidden by the current filters.'
+                    : selectedNs.length > 0
+                      ? 'No workloads in the selected namespaces.'
+                      : 'This cluster has no workloads Marsad can see.'}
+                </Overlay>
+              )}
+
+              <Inspector
+                node={selectedNode}
+                edge={selectedEdge}
+                nodesById={nodesById}
+                onClose={() => {
                   setSelectedNode(null)
                   setSelectedEdge(null)
                 }}
               />
-            )}
-
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-between p-3.5">
-              <div className="pointer-events-auto">
-                <Legend />
-              </div>
-              {/* Given a backdrop: the canvas extends underneath, and bare text
-                  over a node label is unreadable for both. */}
-              <p className="glass rim hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] text-faint md:flex">
-                <Kbd>⌘K</Kbd> search
-                <span className="opacity-40">·</span>
-                <Kbd>esc</Kbd> close
-                <span className="opacity-40">·</span>
-                click an edge for the rule behind it
-              </p>
             </div>
 
-            {graph?.truncated && (
-              <div className="glass rim pointer-events-none absolute top-3.5 left-1/2 z-10 -translate-x-1/2 rounded-full border border-warn/40 px-3.5 py-1.5 text-[12px] text-muted">
-                Some peers matched more workloads than can be drawn and were collapsed to their
-                namespace.
-              </div>
-            )}
-
-
-            {error && (
-              <Overlay icon={TriangleAlert} title="Could not reach the API">
-                <p>{error}</p>
-                <p className="mt-2 text-faint">Marsad is read-only, so this is safe to retry.</p>
-              </Overlay>
-            )}
-
-            {empty && (
-              <Overlay icon={hidden > 0 ? ShieldOff : Telescope} title="Nothing to draw">
-                {hidden > 0
-                  ? 'Every node is hidden by the current filters.'
-                  : selectedNs.length > 0
-                    ? 'No workloads in the selected namespaces.'
-                    : 'This cluster has no workloads Marsad can see.'}
-              </Overlay>
-            )}
-
-            <Inspector
-              node={selectedNode}
-              edge={selectedEdge}
-              nodesById={nodesById}
-              onClose={() => {
-                setSelectedNode(null)
-                setSelectedEdge(null)
-              }}
+            <CanvasBar
+              onZoomIn={() => graphControls.current?.zoomIn()}
+              onZoomOut={() => graphControls.current?.zoomOut()}
+              onFit={() => graphControls.current?.fit()}
             />
           </main>
         </div>

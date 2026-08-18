@@ -20,7 +20,11 @@ export const meta = {
       },
     ],
   },
-  counts: { namespaces: 2, workloads: 3, policies: 2 },
+  // Four workloads, matching the graph: api, legacy, web and kube-proxy. The
+  // header's total and the rail's "N of M" read from different sources — the
+  // cluster and the drawn graph — and a fixture where they disagree makes every
+  // screenshot look like a bug.
+  counts: { namespaces: 2, workloads: 4, policies: 2 },
   warnings: null,
   combineMode: 'intersect',
   readOnly: true,
