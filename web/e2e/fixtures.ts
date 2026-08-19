@@ -329,6 +329,30 @@ export const undecidableVerdict = {
   summary: 'UNDECIDABLE: apps/Deployment/prod/api → 52.216.0.1/32 on 443/TCP',
 }
 
+/**
+ * The policies, for searching by name.
+ *
+ * One of them selects nothing, which is the finding a directory listing hides:
+ * label drift leaves a policy that protects exactly as much as no policy at
+ * all, while still looking like coverage.
+ */
+export const policies = [
+  {
+    ref: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'api-ingress' },
+    provider: 'k8s',
+    types: 'Ingress',
+    selector: 'app=api',
+    selects: 1,
+  },
+  {
+    ref: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'default-deny' },
+    provider: 'k8s',
+    types: 'Ingress,Egress',
+    selector: 'app in (api,db)',
+    selects: 0,
+  },
+]
+
 /** Serves the fixture cluster and lets the websocket fail, which is a state the
  * UI must survive: it falls back to the HTTP fetch and reports "offline". */
 export async function mockApi(page: Page) {
@@ -342,6 +366,7 @@ export async function mockApi(page: Page) {
   )
   await page.route('**/api/simulate', (r) => r.fulfill({ json: verdict }))
   await page.route('**/api/rules*', (r) => r.fulfill({ json: ruleDetails }))
+  await page.route('**/api/policies', (r) => r.fulfill({ json: policies }))
   await page.route('**/api/health', (r) =>
     r.fulfill({ json: { ok: true, ready: true, time: new Date().toISOString(), progress: [] } }),
   )

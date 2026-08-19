@@ -1,4 +1,4 @@
-import { Moon, RefreshCw, Route, Search, ShieldCheck, Sun } from 'lucide-react'
+import { Moon, RefreshCw, Search, ShieldCheck, Sun } from 'lucide-react'
 
 import { useEffect, useState } from 'react'
 
@@ -21,7 +21,6 @@ interface Props {
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   onOpenSearch: () => void
-  onOpenSimulate: () => void
 }
 
 /**
@@ -200,7 +199,6 @@ export function AppHeader({
   theme,
   onToggleTheme,
   onOpenSearch,
-  onOpenSimulate,
 }: Props) {
   const unavailable = meta?.capabilities.policies.filter((p) => !p.available) ?? []
 
@@ -235,6 +233,10 @@ export function AppHeader({
 
       <div className="flex-1" />
 
+      {/* One entry, not two. Search and simulate were adjacent buttons doing the
+          same thing to different halves of the question — find something, then
+          ask about it — and the palette does both, including ⌘↵ to simulate
+          from whatever is highlighted. */}
       <Button
         variant="outline"
         size="md"
@@ -242,14 +244,8 @@ export function AppHeader({
         className="gap-2 pr-1.5 pl-2.5 text-muted"
       >
         <Search className="size-3.5" />
-        <span className="hidden text-[12.5px] sm:inline">Search</span>
-        <Kbd className="ml-1">/</Kbd>
-      </Button>
-
-      <Button variant="outline" size="md" onClick={onOpenSimulate}>
-        <Route />
-        <span className="hidden text-[12.5px] sm:inline">Simulate</span>
-        <Kbd className="ml-1">s</Kbd>
+        <span className="hidden text-[12.5px] sm:inline">Search or simulate</span>
+        <Kbd className="ml-1">⌘K</Kbd>
       </Button>
 
       {meta && (
