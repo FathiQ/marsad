@@ -11,7 +11,9 @@ export default defineConfig({
   // measurement means anything — and Playwright's default worker count starves
   // them on a busy machine. They then fail for lack of CPU rather than for any
   // reason in the product, which is the worst kind of red.
-  workers: 3,
+  // One on CI, where the runner is small and the graph tests are the first
+  // thing to starve; three locally, which is fast without contending.
+  workers: process.env.CI ? 1 : 3,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
