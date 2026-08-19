@@ -74,6 +74,12 @@ type Watcher struct {
 	dynFactory dynamicinformer.DynamicSharedInformerFactory
 	anpLister  cache.GenericLister
 
+	// Retained so startup can be reported rather than guessed at. Waiting for
+	// caches to sync is the slowest thing Marsad does on a large cluster, and a
+	// spinner that says nothing for forty seconds is indistinguishable from one
+	// that is stuck.
+	progress []syncGroup
+
 	dirty chan struct{}
 	state atomic.Pointer[State]
 	rev   atomic.Uint64
@@ -102,19 +108,26 @@ func NewWatcher(clients *Clients, caps Capabilities, log *slog.Logger) *Watcher 
 	}
 
 	f := w.factory
-	informersToWatch := []cache.SharedIndexInformer{
-		f.Core().V1().Namespaces().Informer(),
-		f.Core().V1().Pods().Informer(),
+
+	// Grouped the way the startup screen reads them, not the way client-go
+	// organises them: nobody waiting for Marsad to start is asking after
+	// ReplicaSets.
+	namespaces := []cache.SharedIndexInformer{f.Core().V1().Namespaces().Informer()}
+	workloads := []cache.SharedIndexInformer{
 		f.Apps().V1().Deployments().Informer(),
 		f.Apps().V1().StatefulSets().Informer(),
 		f.Apps().V1().DaemonSets().Informer(),
-		// ReplicaSets are watched only to walk Pod → ReplicaSet → Deployment;
-		// they are never nodes themselves.
-		f.Apps().V1().ReplicaSets().Informer(),
 		f.Batch().V1().Jobs().Informer(),
 		f.Batch().V1().CronJobs().Informer(),
-		f.Networking().V1().NetworkPolicies().Informer(),
 	}
+	// Watched, but not counted towards anything a person asked about: Pods are
+	// how orphans are found, and ReplicaSets only exist to walk
+	// Pod → ReplicaSet → Deployment.
+	plumbing := []cache.SharedIndexInformer{
+		f.Core().V1().Pods().Informer(),
+		f.Apps().V1().ReplicaSets().Informer(),
+	}
+	policies := []cache.SharedIndexInformer{f.Networking().V1().NetworkPolicies().Informer()}
 
 	if caps.Has(awsanp.Name) {
 		w.dynFactory = dynamicinformer.NewFilteredDynamicSharedInformerFactory(
@@ -122,14 +135,57 @@ func NewWatcher(clients *Clients, caps Capabilities, log *slog.Logger) *Watcher 
 		gvr := awsanp.Provider{}.GVR()
 		anp := w.dynFactory.ForResource(gvr)
 		w.anpLister = anp.Lister()
-		informersToWatch = append(informersToWatch, anp.Informer())
+		policies = append(policies, anp.Informer())
 	}
 
-	for _, inf := range informersToWatch {
-		w.addHandler(inf)
+	w.progress = []syncGroup{
+		{name: "namespaces", informers: namespaces},
+		{name: "workloads", informers: workloads},
+		{name: "network policies", informers: policies},
+	}
+
+	for _, group := range append(w.progress, syncGroup{informers: plumbing}) {
+		for _, inf := range group.informers {
+			w.addHandler(inf)
+		}
 	}
 
 	return w
+}
+
+// syncGroup is one line on the startup screen.
+type syncGroup struct {
+	name      string
+	informers []cache.SharedIndexInformer
+}
+
+// SyncStep reports one group's readiness while the caches fill.
+type SyncStep struct {
+	Name   string `json:"name"`
+	Synced bool   `json:"synced"`
+	// Count is what has arrived so far, which before Synced is a lower bound
+	// rather than a total. The UI says "so far" for exactly that reason.
+	Count int `json:"count"`
+}
+
+// Progress reports how far the initial cache sync has got.
+//
+// Available before the first State exists, which is the whole point: every
+// other endpoint answers 503 until the caches are warm, and that is precisely
+// the window someone is staring at a blank screen wondering whether it works.
+func (w *Watcher) Progress() []SyncStep {
+	out := make([]SyncStep, 0, len(w.progress))
+	for _, group := range w.progress {
+		step := SyncStep{Name: group.name, Synced: true}
+		for _, inf := range group.informers {
+			if !inf.HasSynced() {
+				step.Synced = false
+			}
+			step.Count += len(inf.GetStore().ListKeys())
+		}
+		out = append(out, step)
+	}
+	return out
 }
 
 // SetDebounce overrides the rebuild delay. Intended for tests.

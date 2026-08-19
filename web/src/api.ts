@@ -334,6 +334,25 @@ export function fetchWorkload(namespace: string, name: string, kind?: string) {
   )
 }
 
+/** One line on the startup screen: a group of informers and how far it has got. */
+export interface SyncStep {
+  name: string
+  synced: boolean
+  /** What has arrived so far. Before `synced` this is a lower bound, not a
+   * total, which is why the screen says "so far". */
+  count: number
+}
+
+export interface Health {
+  ok: boolean
+  ready: boolean
+  progress?: SyncStep[]
+  time: string
+}
+
+/** Answers while the caches are still filling, when everything else 503s. */
+export const fetchHealth = () => get<Health>('/api/health')
+
 export interface StreamMessage {
   type: string
   revision: number
@@ -343,21 +362,55 @@ export interface StreamMessage {
 }
 
 /**
+ * How current what you are looking at is.
+ *
+ * A config-reading tool has no other tell. A graph rendered from a snapshot
+ * taken four minutes ago looks exactly like one rendered a second ago, and the
+ * difference is whether the answer is about the cluster or about its past — so
+ * the state is carried explicitly rather than reduced to a boolean.
+ */
+export type StreamState = 'live' | 'reconnecting' | 'snapshot'
+
+export interface StreamStatus {
+  state: StreamState
+  /** When the last graph arrived. Null until the first one does. */
+  updatedAt: Date | null
+  /** For 'reconnecting': when the next attempt is due. */
+  retryAt: Date | null
+  attempt: number
+}
+
+export interface StreamHandle {
+  close: () => void
+  /** Try again now, rather than waiting out the backoff. */
+  reconnect: () => void
+  /** Stop retrying and keep showing what is on screen. */
+  keepSnapshot: () => void
+}
+
+/**
  * Subscribes to live graph updates.
  *
  * The server pushes a whole graph rather than a diff, debounced on its side, so
- * there is no reconciliation protocol to get wrong here. Reconnects with backoff
- * because a dropped socket is routine — a rolling restart, a laptop lid.
+ * there is no reconciliation protocol to get wrong here. Reconnects with
+ * backoff because a dropped socket is routine — a rolling restart, a laptop
+ * lid — and reports which of those two situations it is in, because "offline"
+ * covered both and they call for different things from the person reading it.
  */
 export function openStream(
   q: GraphQuery,
   onMessage: (m: StreamMessage) => void,
-  onStatus: (connected: boolean) => void,
-): () => void {
+  onStatus: (status: StreamStatus) => void,
+): StreamHandle {
   let socket: WebSocket | null = null
   let retry = 0
   let timer: number | undefined
   let closed = false
+  let giveUp = false
+  let updatedAt: Date | null = null
+
+  const report = (state: StreamState, retryAt: Date | null = null) =>
+    onStatus({ state, updatedAt, retryAt, attempt: retry })
 
   const connect = () => {
     if (closed) return
@@ -366,11 +419,13 @@ export function openStream(
 
     socket.onopen = () => {
       retry = 0
-      onStatus(true)
+      report('live')
     }
     socket.onmessage = (ev) => {
       try {
         onMessage(JSON.parse(ev.data as string) as StreamMessage)
+        updatedAt = new Date()
+        report('live')
       } catch {
         // A malformed frame is not worth tearing the connection down for.
       }
@@ -383,19 +438,39 @@ export function openStream(
       // nothing ever sets it back. The badge then reads offline while updates
       // are arriving normally.
       if (closed) return
+      if (giveUp) {
+        report('snapshot')
+        return
+      }
 
-      onStatus(false)
       retry = Math.min(retry + 1, 6)
-      timer = window.setTimeout(connect, Math.min(1000 * 2 ** retry, 30_000))
+      const delay = Math.min(1000 * 2 ** retry, 30_000)
+      report('reconnecting', new Date(Date.now() + delay))
+      timer = window.setTimeout(connect, delay)
     }
     socket.onerror = () => socket?.close()
   }
 
   connect()
 
-  return () => {
-    closed = true
-    if (timer) window.clearTimeout(timer)
-    socket?.close()
+  return {
+    close: () => {
+      closed = true
+      if (timer) window.clearTimeout(timer)
+      socket?.close()
+    },
+    reconnect: () => {
+      giveUp = false
+      retry = 0
+      if (timer) window.clearTimeout(timer)
+      report('reconnecting', new Date())
+      socket?.close()
+      connect()
+    },
+    keepSnapshot: () => {
+      giveUp = true
+      if (timer) window.clearTimeout(timer)
+      report('snapshot')
+    },
   }
 }

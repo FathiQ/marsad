@@ -6,6 +6,12 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // Capped deliberately. Several tests measure real canvas timing — a camera
+  // that animates into its fit, an overlay that has to stop repainting before a
+  // measurement means anything — and Playwright's default worker count starves
+  // them on a busy machine. They then fail for lack of CPU rather than for any
+  // reason in the product, which is the worst kind of red.
+  workers: 3,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',

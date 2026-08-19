@@ -132,11 +132,27 @@ func (s *Server) notReady(w http.ResponseWriter) {
 	})
 }
 
+// progressSource is implemented by a source that can report how far the initial
+// cache sync has got. Kept separate from StateSource so a fixed test snapshot
+// does not have to pretend to be starting up.
+type progressSource interface {
+	Progress() []cluster.SyncStep
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	state := s.opts.Source.State()
+
+	// Reported while the caches fill, which is the one window in which every
+	// other endpoint answers 503 and someone is watching a blank screen.
+	var progress []cluster.SyncStep
+	if p, ok := s.opts.Source.(progressSource); ok {
+		progress = p.Progress()
+	}
+
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    state != nil,
-		"ready": state != nil && state.Snapshot != nil,
-		"time":  time.Now().UTC(),
+		"ok":       state != nil,
+		"ready":    state != nil && state.Snapshot != nil,
+		"progress": progress,
+		"time":     time.Now().UTC(),
 	})
 }

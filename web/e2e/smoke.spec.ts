@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   approximateVerdict,
   graph,
+  meta,
   mockApi,
   undecidableVerdict,
   worldRuleDetails,
@@ -351,12 +352,12 @@ test('stays live when the graph query changes', async ({ page }) => {
   })
   await page.reload()
 
-  await expect(page.getByText('live')).toBeVisible()
+  await expect(page.getByText(/^live/)).toBeVisible()
 
   await page.getByRole('radio', { name: 'Workload' }).click()
   await page.waitForTimeout(1200)
-  await expect(page.getByText('live')).toBeVisible()
-  await expect(page.getByText('offline')).toBeHidden()
+  await expect(page.getByText(/^live/)).toBeVisible()
+  await expect(page.getByText(/snapshot|reconnecting/)).toBeHidden()
 })
 
 test('survives an edge whose rule list is null', async ({ page }) => {
@@ -376,9 +377,30 @@ test('survives an edge whose rule list is null', async ({ page }) => {
 })
 
 test('reports the websocket being down rather than looking live', async ({ page }) => {
-  // No websocket is served by the preview server, so the UI must degrade to
-  // "offline" instead of implying the graph is still updating.
-  await expect(page.getByText('offline')).toBeVisible({ timeout: 10_000 })
+  // No websocket is served by the preview server, so the UI must say the graph
+  // has stopped updating instead of implying it still is. "offline" used to
+  // cover both a socket that is retrying and one that has given up — different
+  // situations, calling for different responses from whoever is reading it.
+  await expect(page.getByText(/reconnecting/)).toBeVisible({ timeout: 10_000 })
+})
+
+test('a stopped stream says what you are looking at instead', async ({ page }) => {
+  // A graph rendered from a four-minute-old snapshot looks exactly like one
+  // rendered a second ago. That is the whole reason this state exists.
+  await expect(page.getByText(/Live updates stopped/)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole('button', { name: 'Reconnect' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Keep viewing snapshot' })).toBeVisible()
+})
+
+test('keeping the snapshot stops the retrying, and says so', async ({ page }) => {
+  await page.getByRole('button', { name: 'Keep viewing snapshot' }).click()
+
+  const header = page.getByRole('banner')
+  await expect(header.getByText(/snapshot/)).toBeVisible()
+  await expect(header.getByText(/reconnecting/)).toBeHidden()
+  // Still offered a way back: choosing to stop watching is not the same as
+  // choosing never to look again.
+  await expect(header.getByRole('button', { name: 'Reconnect' })).toBeVisible()
 })
 
 test('simulate reports both halves, not just the answer', async ({ page }) => {
@@ -1116,6 +1138,9 @@ const twoNodeGraph = (via: string[]) => ({
 })
 
 test('clicking an edge shows the rule behind it, where the edge is', async ({ page }) => {
+  // Canvas plus an animating camera: the same timing-sensitive class as the
+  // pan test, and it competes with fifty others for CPU under fullyParallel.
+  test.slow()
   // The canvas bar has promised this since the beginning, and clicking an edge
   // opened the same side panel workloads use — several hundred pixels from the
   // question, after the graph had shifted to make room.
@@ -1162,6 +1187,9 @@ test('clicking an edge shows the rule behind it, where the edge is', async ({ pa
  */
 
 test('an edge admitting the whole internet says so', async ({ page }) => {
+  // Canvas plus an animating camera: the same timing-sensitive class as the
+  // pan test, and it competes with fifty others for CPU under fullyParallel.
+  test.slow()
   // Derived from the rule, so it fires however the policy was written.
   await page.route('**/api/rules*', (r) => r.fulfill({ json: worldRuleDetails }))
   await page.route('**/api/graph*', (r) =>
@@ -1180,4 +1208,104 @@ test('an edge admitting the whole internet says so', async ({ page }) => {
   await expect(
     page.getByRole('dialog', { name: 'Connection' }).getByText(/accepts from every address/),
   ).toBeVisible()
+})
+
+/* --------------------------------------------------------------- states */
+
+test('the startup screen reports real progress, and what Marsad will do', async ({ page }) => {
+  // Waiting for informer caches is the slowest thing Marsad does on a large
+  // cluster, and a bar that says nothing for forty seconds is indistinguishable
+  // from one that is stuck. The counts come from /api/health, which is the one
+  // endpoint that answers while everything else is still 503.
+  await page.route('**/api/meta', (r) => r.fulfill({ status: 503, json: { error: 'syncing' } }))
+  await page.route('**/api/namespaces', (r) => r.fulfill({ status: 503, json: { error: 'syncing' } }))
+  await page.route('**/api/graph*', (r) => r.fulfill({ status: 503, json: { error: 'syncing' } }))
+  await page.route('**/api/health', (r) =>
+    r.fulfill({
+      json: {
+        ok: true,
+        ready: false,
+        time: new Date().toISOString(),
+        progress: [
+          { name: 'namespaces', synced: true, count: 8 },
+          { name: 'workloads', synced: true, count: 10 },
+          { name: 'network policies', synced: false, count: 3 },
+        ],
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await expect(page.getByText('Reading your cluster')).toBeVisible()
+  await expect(page.getByText(/8\s*namespaces/)).toBeVisible()
+  await expect(page.getByText(/10\s*workloads/)).toBeVisible()
+  // An unfinished group reports a lower bound, and says so rather than
+  // presenting it as a total.
+  await expect(page.getByText(/3\s*network policies\s*so far/)).toBeVisible()
+
+  await expect(
+    page.getByText('Read-only. Marsad lists and watches; it never writes.'),
+  ).toBeVisible()
+})
+
+test('a cluster with no policies is a finding, not a blank screen', async ({ page }) => {
+  await page.route('**/api/meta', (r) =>
+    r.fulfill({ json: { ...meta, counts: { namespaces: 2, workloads: 6, policies: 0 } } }),
+  )
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: { level: 'workload', nodes: [], edges: [] } } }),
+  )
+  await page.reload()
+
+  await expect(page.getByText('No network policies at all')).toBeVisible()
+  await expect(
+    page.getByText(/There is nothing for Marsad to draw — which is itself the finding/),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show all 6 workloads' })).toBeVisible()
+})
+
+test('an over-narrow filter blames the filter, not the cluster', async ({ page }) => {
+  // A graph with nodes, all of them protected: asking for only the unprotected
+  // ones then empties the screen *by filtering*, which is the distinction this
+  // state exists to draw. An already-empty graph hides nothing and is a
+  // different message entirely.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: {
+          level: 'workload',
+          nodes: [
+            {
+              id: 'wl:prod/Deployment/api',
+              kind: 'workload',
+              label: 'api',
+              namespace: 'prod',
+              workloadKind: 'Deployment',
+              replicas: 1,
+              isolation: { ingress: true, egress: true },
+            },
+          ],
+          edges: [],
+        },
+      },
+    }),
+  )
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await page.getByText('Only unprotected').click()
+
+  await expect(page.getByText('No workload matches these filters')).toBeVisible()
+  await expect(page.getByText('The cluster is fine — the filter is too narrow.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear filters' })).toBeVisible()
+})
+
+test('the simulate panel says what it is waiting for', async ({ page }) => {
+  // Not a blank area that looks the same before the first run as it does after
+  // one that returned nothing.
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
+  await expect(dialog.getByText(/Name both ends and a port/)).toBeVisible()
+  await expect(dialog.getByText(/never opens a connection to find out/)).toBeVisible()
 })
