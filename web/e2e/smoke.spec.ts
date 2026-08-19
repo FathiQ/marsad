@@ -1088,17 +1088,49 @@ async function edgePixels(page: Page, rgb: [number, number, number]) {
  * them.
  */
 async function clickAnEdge(page: Page, rgb: [number, number, number] = [0x38, 0xd0, 0x80]) {
+  /*
+   * Namespace containers are drawn in the namespace's own palette hue, and the
+   * palette assigns by position in the sorted list — which makes `prod` green,
+   * the same green as an allowed edge. The container is far larger than the
+   * line, so most matching pixels were its border, and whether any of the
+   * sampled candidates landed on the actual edge came down to luck. Turning the
+   * containers off leaves the edge as very nearly the only green thing on the
+   * canvas.
+   */
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await page.getByText('Group by namespace').click()
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await expect(page.getByRole('button', { name: 'Filters' })).toBeVisible()
+
   const box = await page.locator('main canvas').first().boundingBox()
   expect(box).not.toBeNull()
 
   const popover = page.getByRole('dialog', { name: 'Connection' })
+  const inspector = page.getByRole('dialog', { name: 'Details' })
+
+  const tried = new Set<string>()
   for (let attempt = 0; attempt < 24; attempt++) {
     const points = await edgePixels(page, rgb)
     expect(points.length, 'the edge was never painted').toBeGreaterThan(0)
 
-    const point = points[attempt % points.length]!
+    const point = points.find((p) => !tried.has(`${p.x},${p.y}`)) ?? points[0]!
+    tried.add(`${point.x},${point.y}`)
+
     await page.mouse.click(box!.x + box!.width * point.x, box!.y + box!.height * point.y)
     if (await popover.isVisible()) return
+
+    /*
+     * A miss that lands on a card opens the inspector, and the inspector is a
+     * 34rem panel over the right-hand side of the stage. Every later click then
+     * lands on *it* rather than on the canvas, so the loop keeps going and
+     * never reaches the edge again — which is why this failed having "tried"
+     * two dozen candidates, and why it failed identically on retry rather than
+     * flaking. Clearing the selection puts the canvas back.
+     */
+    if (await inspector.isVisible()) {
+      await page.locator('body').press('Escape')
+      await expect(inspector).toBeHidden()
+    }
   }
   throw new Error('clicked every candidate on the edge and no popover opened')
 }
