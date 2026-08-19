@@ -10,7 +10,7 @@
 # port 53 — but that allowance lives in the NetworkPolicy layer, and this policy
 # constitutes a second layer that permits only 443. Because the layers combine by
 # intersection, an ANP without its own DNS rule silently revokes name resolution,
-# and a pod that cannot resolve *.s3.me-south-1.amazonaws.com cannot reach it
+# and a pod that cannot resolve *.s3.us-east-1.amazonaws.com cannot reach it
 # either. Run Marsad against this file with and without the DNS rule to see the
 # effective egress change.
 apiVersion: networking.k8s.aws/v1alpha1
@@ -27,11 +27,11 @@ spec:
   egress:
     - to:
         # The wildcard matches one or more WHOLE labels, so this reaches
-        # anything.s3.me-south-1.amazonaws.com at any depth — but not other
+        # anything.s3.us-east-1.amazonaws.com at any depth — but not other
         # regions and not other AWS services.
         - domainNames:
-            - "*.s3.me-south-1.amazonaws.com"
-            - "sts.me-south-1.amazonaws.com"
+            - "*.s3.us-east-1.amazonaws.com"
+            - "sts.us-east-1.amazonaws.com"
       ports:
         - protocol: TCP
           port: 443

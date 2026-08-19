@@ -133,7 +133,7 @@ type Peer struct {
 	CIDR   netip.Prefix
 	Except []netip.Prefix
 
-	// PeerDomain — may be a wildcard: "*.s3.me-south-1.amazonaws.com"
+	// PeerDomain — may be a wildcard: "*.s3.us-east-1.amazonaws.com"
 	Domain string
 }
 
