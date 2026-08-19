@@ -43,7 +43,7 @@ test('command palette opens with / and finds a workload', async ({ page }) => {
   await page.locator('body').press('/')
   await expect(page.getByRole('dialog', { name: 'Search the cluster' })).toBeVisible()
 
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await expect(page.getByRole('option', { name: /api/ }).first()).toBeVisible()
 })
 
@@ -54,7 +54,7 @@ test('command palette opens with the meta shortcut too', async ({ page }) => {
 
 test('selecting from the palette opens the inspector with the policy YAML', async ({ page }) => {
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -70,7 +70,7 @@ test('selecting from the palette opens the inspector with the policy YAML', asyn
 
 test('escape closes the inspector', async ({ page }) => {
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
   await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible()
 
@@ -367,7 +367,7 @@ test('survives an edge whose rule list is null', async ({ page }) => {
   // failure that looks like the cluster is unreachable when the data arrived
   // fine. The server no longer sends null; this proves the UI copes anyway.
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByPlaceholder(/Search workloads/).fill('legacy')
   await page.getByRole('option', { name: /legacy/ }).first().click()
   await expect(page.getByRole('dialog', { name: 'Details' })).toBeVisible()
 
@@ -404,7 +404,7 @@ test('keeping the snapshot stops the retrying, and says so', async ({ page }) =>
 })
 
 test('simulate reports both halves, not just the answer', async ({ page }) => {
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
 
@@ -444,7 +444,7 @@ test('simulate reports both halves, not just the answer', async ({ page }) => {
 })
 
 test('a free-text destination says how it was read', async ({ page }) => {
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog')
 
   await dialog.locator('#sim-to').fill('sts.amazonaws.com')
@@ -461,7 +461,7 @@ test('a free-text destination says how it was read', async ({ page }) => {
 })
 
 test('the suggestion list is reachable, navigable and sensibly ordered', async ({ page }) => {
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog')
   await dialog.locator('#sim-from').click()
 
@@ -492,7 +492,7 @@ test('the suggestion list is reachable, navigable and sensibly ordered', async (
 })
 
 test('escape dismisses the suggestion list before the dialog', async ({ page }) => {
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog')
   await dialog.locator('#sim-to').click()
   await expect(dialog.getByRole('listbox').first()).toBeVisible()
@@ -677,7 +677,7 @@ test('selecting an open workload draws its exposure, unselected does not', async
   const before = await settled(page)
 
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('runner')
+  await page.getByPlaceholder(/Search workloads/).fill('runner')
   await page.getByRole('option', { name: /runner/ }).first().click()
 
   const after = await settled(page)
@@ -792,7 +792,7 @@ test('the inspector explains an unprotected workload rather than leaving a blank
   page,
 }) => {
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByPlaceholder(/Search workloads/).fill('legacy')
   await page.getByRole('option', { name: /legacy/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -825,7 +825,7 @@ test('the empty state names the policies that nearly matched, and why', async ({
   // fact; which policy was *supposed* to is the question, and answering it by
   // hand means opening every policy in the namespace and comparing selectors.
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('legacy')
+  await page.getByPlaceholder(/Search workloads/).fill('legacy')
   await page.getByRole('option', { name: /legacy/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -855,7 +855,7 @@ test('a rule names the policy that decided it, and opens its YAML', async ({ pag
   // The rule identifier is precise and unreadable, and the precision only
   // matters once you have already found the policy.
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -870,7 +870,7 @@ test('a rule names the policy that decided it, and opens its YAML', async ({ pag
 
 test('directions are named for what they do, with their isolation', async ({ page }) => {
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -884,7 +884,7 @@ test('an approximate rule carries its reason where the rule is', async ({ page }
   // Not a footnote: the uncertainty belongs to this rule, and a reader deciding
   // whether to trust it should not have to go looking.
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -895,7 +895,7 @@ test('an approximate rule carries its reason where the rule is', async ({ page }
 
 test('the inspector offers to simulate from what it is describing', async ({ page }) => {
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   await page.getByRole('button', { name: 'Simulate from api' }).click()
@@ -906,7 +906,7 @@ test('a protected workload keeps its rules and its policy list', async ({ page }
   // Guards the branch: the unprotected treatment must not leak onto a workload
   // that policies do cover.
   await page.locator('body').press('/')
-  await page.getByPlaceholder('Search workloads, namespaces and peers…').fill('api')
+  await page.getByPlaceholder(/Search workloads/).fill('api')
   await page.getByRole('option', { name: /api/ }).first().click()
 
   const inspector = page.getByRole('dialog', { name: 'Details' })
@@ -928,7 +928,7 @@ test('the header names the build that is answering', async ({ page }) => {
 /* ------------------------------------------------- simulate and edge rules */
 
 async function runSimulation(page: Page) {
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
   await expect(dialog).toBeVisible()
   await dialog.locator('#sim-from').fill('edge/web')
@@ -981,7 +981,7 @@ test('the refusing half says what it does accept', async ({ page }) => {
   // Picked from the suggestion list rather than typed: what a workload accepts
   // can only be read from a workload, and free text is a domain until the
   // cluster says otherwise. That is the behaviour, not a detail of the test.
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
   await expect(dialog).toBeVisible()
 
@@ -1336,7 +1336,7 @@ test('an over-narrow filter blames the filter, not the cluster', async ({ page }
 test('the simulate panel says what it is waiting for', async ({ page }) => {
   // Not a blank area that looks the same before the first run as it does after
   // one that returned nothing.
-  await page.getByRole('button', { name: /Simulate/ }).click()
+  await page.locator('body').press('s')
   const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
   await expect(dialog.getByText(/Name both ends and a port/)).toBeVisible()
   await expect(dialog.getByText(/never opens a connection to find out/)).toBeVisible()
@@ -1404,4 +1404,65 @@ test('an unreachable cluster is not offered a ClusterRole', async ({ page }) => 
 
   await expect(page.getByText('The cluster could not be reached')).toBeVisible()
   await expect(page.getByText('The ClusterRole it needs')).toBeHidden()
+})
+
+/* -------------------------------------------------------------- the palette */
+
+test('one entry in the header, not two', async ({ page }) => {
+  // Search and simulate were adjacent buttons doing the same thing to different
+  // halves of the question.
+  const header = page.getByRole('banner')
+  await expect(header.getByRole('button', { name: /Search or simulate/ })).toBeVisible()
+  // The separate Simulate button is gone; `s` still opens the panel.
+  await expect(header.getByRole('button', { name: /^Simulate/ })).toHaveCount(0)
+})
+
+test('policies are searchable by name', async ({ page }) => {
+  // The direction a policy name actually arrives in: somebody says
+  // "default-deny" and you want to know what it is and what it touches. Until
+  // now you could only go the other way, from a workload to what selects it.
+  await page.locator('body').press('/')
+  const dialog = page.getByRole('dialog', { name: 'Search the cluster' })
+  await dialog.getByPlaceholder(/Search workloads, namespaces, policies/).fill('default-deny')
+
+  await expect(dialog.getByRole('option', { name: /default-deny/ })).toBeVisible()
+  // A policy matching no workload looks like coverage in any list that does not
+  // count.
+  await expect(dialog.getByText('selects nothing')).toBeVisible()
+})
+
+test('workload rows carry their posture', async ({ page }) => {
+  await page.locator('body').press('/')
+  const dialog = page.getByRole('dialog', { name: 'Search the cluster' })
+
+  await dialog.getByPlaceholder(/Search workloads/).fill('legacy')
+  await expect(dialog.getByRole('option', { name: /legacy/ }).getByText('unprotected')).toBeVisible()
+
+  await dialog.getByPlaceholder(/Search workloads/).fill('api')
+  await expect(dialog.getByRole('option', { name: /api/ }).first().getByText('protected')).toBeVisible()
+})
+
+test('the palette launches the tool, not just navigation', async ({ page }) => {
+  // ⌘↵ on a row opens the simulation already framed by it. Finding a thing and
+  // then having to go and find it again somewhere else is the gap this closes.
+  await page.locator('body').press('/')
+  const dialog = page.getByRole('dialog', { name: 'Search the cluster' })
+  await dialog.getByPlaceholder(/Search workloads/).fill('api')
+  await expect(dialog.getByRole('option', { name: /api/ }).first()).toBeVisible()
+
+  await dialog.getByPlaceholder(/Search workloads/).press('ControlOrMeta+Enter')
+
+  const simulate = page.getByRole('dialog', { name: /Would this connection be allowed/ })
+  await expect(simulate).toBeVisible()
+  // Framed by the row it was launched from.
+  await expect(simulate.locator('#sim-from')).toHaveValue(/api/)
+})
+
+test('the palette says which keys do what', async ({ page }) => {
+  await page.locator('body').press('/')
+  const dialog = page.getByRole('dialog', { name: 'Search the cluster' })
+  // Each hint sits beside its key cap, so the element reads "↑↓ navigate".
+  for (const hint of ['navigate', 'open', 'simulate from', 'close']) {
+    await expect(dialog.getByText(hint, { exact: false }).first()).toBeVisible()
+  }
 })

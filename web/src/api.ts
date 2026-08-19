@@ -87,6 +87,19 @@ export interface NamespaceSummary {
   unprotected: number
 }
 
+/** One policy as the search index sees it. */
+export interface PolicySummary {
+  ref: ObjectRef
+  provider: string
+  types: string
+  selector: string
+  /** How many workloads its podSelector actually matches. Zero is usually label
+   * drift, and protects exactly as much as no policy at all. */
+  selects: number
+}
+
+export const fetchPolicies = () => get<PolicySummary[]>('/api/policies')
+
 export interface PortRange {
   protocol: string
   allPorts?: boolean

@@ -80,6 +80,47 @@ func (s *Server) handleNamespaces(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, out)
 }
 
+// policySummary is one policy as the search index sees it.
+type policySummary struct {
+	Ref      npeval.ObjectRef   `json:"ref"`
+	Provider string             `json:"provider"`
+	Types    npeval.PolicyTypes `json:"types"`
+	Selector string             `json:"selector"`
+	// Selects is how many workloads the podSelector actually matches. Zero is
+	// worth knowing: a policy that selects nothing is usually label drift, and
+	// it protects exactly as much as no policy at all while looking like
+	// coverage in a directory listing.
+	Selects int `json:"selects"`
+}
+
+// handlePolicies lists every policy, for searching by name.
+//
+// Policies were the one thing in the cluster with no way to look them up. You
+// could find a workload and read the policies that select it, but not go the
+// other way — from "somebody mentioned default-deny" to what it is and what it
+// touches — which is the direction a name arrives in.
+func (s *Server) handlePolicies(w http.ResponseWriter, _ *http.Request) {
+	e, _ := s.evaluator()
+	if e == nil {
+		s.notReady(w)
+		return
+	}
+
+	snap := e.Snapshot()
+	policies := snap.Policies("")
+	out := make([]policySummary, 0, len(policies))
+	for _, p := range policies {
+		out = append(out, policySummary{
+			Ref:      p.Ref,
+			Provider: p.Provider,
+			Types:    p.Types,
+			Selector: p.Selector.String(),
+			Selects:  len(e.SelectedBy(p.Ref)),
+		})
+	}
+	s.writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	e, state := s.evaluator()
 	if e == nil {

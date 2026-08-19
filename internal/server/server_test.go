@@ -423,3 +423,81 @@ func TestHealthIsQuietWhenNothingIsWrong(t *testing.T) {
 		t.Errorf("a healthy server should report no fault: %s", body)
 	}
 }
+
+// TestPoliciesAreListable: policies were the one thing in the cluster with no
+// way to look them up. You could find a workload and read what selects it, but
+// not go the other way, which is the direction a name arrives in.
+func TestPoliciesAreListable(t *testing.T) {
+	res, body := do(t, testServer(t), http.MethodGet, "/api/policies", "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", res.StatusCode, body)
+	}
+
+	var out []struct {
+		Ref      struct{ Name, Namespace string } `json:"ref"`
+		Provider string                           `json:"provider"`
+		Types    string                           `json:"types"`
+		Selector string                           `json:"selector"`
+		Selects  int                              `json:"selects"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v — %s", err, body)
+	}
+	if len(out) != 1 {
+		t.Fatalf("got %d policies, want 1: %s", len(out), body)
+	}
+
+	got := out[0]
+	if got.Ref.Name != "db-ingress" || got.Ref.Namespace != "prod" {
+		t.Errorf("ref = %+v", got.Ref)
+	}
+	if got.Types != "Ingress" {
+		t.Errorf("types = %q, want Ingress — the mask travels as names", got.Types)
+	}
+	if got.Selector != "app=db" {
+		t.Errorf("selector = %q, want app=db", got.Selector)
+	}
+	// The db deployment, and only it.
+	if got.Selects != 1 {
+		t.Errorf("selects = %d, want 1", got.Selects)
+	}
+}
+
+// TestPolicySelectingNothingSaysZero: a policy matching no workload is usually
+// label drift. It protects exactly as much as no policy at all, while looking
+// like coverage in any list that does not count.
+func TestPolicySelectingNothingSaysZero(t *testing.T) {
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "orphaned"},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: *sel("app", "does-not-exist"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		},
+	}
+	policy, err := k8s.NormalizePolicy(np)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := npeval.NewBuilder().
+		AddNamespace(npeval.Namespace{Name: "prod"}).
+		AddWorkload(deploy("prod", "api", "app", "api")).
+		AddPolicy(policy).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := server.New(server.Options{Source: &fixedSource{
+		state: &cluster.State{Snapshot: snap, Revision: 1, BuiltAt: time.Now()},
+	}})
+
+	_, body := do(t, s, http.MethodGet, "/api/policies", "")
+	var out []struct {
+		Selects int `json:"selects"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Selects != 0 {
+		t.Errorf("expected one policy selecting nothing, got %+v", out)
+	}
+}

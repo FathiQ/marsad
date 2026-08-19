@@ -388,7 +388,6 @@ export default function App() {
             setTheme(next)
           }}
           onOpenSearch={() => setPaletteOpen(true)}
-          onOpenSimulate={() => setSimulateOpen(true)}
         />
 
         <div className="flex min-h-0 flex-1">
@@ -619,6 +618,14 @@ export default function App() {
           onSelectNode={focusNode}
           onSelectNamespace={toggleNamespace}
           onSimulate={() => setSimulateOpen(true)}
+          onSimulateFrom={(node) => {
+            // Selecting it is what frames the simulation: prefill is derived
+            // from the selection, so the two cannot disagree about which
+            // workload the question is about.
+            setSelectedNode(node)
+            setSelectedEdge(null)
+            setSimulateOpen(true)
+          }}
         />
       </div>
     </TooltipProvider>
