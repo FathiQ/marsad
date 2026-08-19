@@ -117,12 +117,35 @@ type policyView struct {
 	YAML     string           `json:"yaml,omitempty"`
 }
 
+// ruleRef resolves a RuleID back to the policy and field path it came from.
+//
+// The identifier already encodes both — "networking.k8s.io/NetworkPolicy/prod/
+// api-allow#ingress[2]" — but making the UI take that apart with a string split
+// would make the wire format a parsing contract, and the first policy name
+// containing a '#' or a '/' would be somebody's afternoon. The server knows the
+// answer; it can simply say it.
+type ruleRef struct {
+	Policy   npeval.ObjectRef `json:"policy"`
+	Provider string           `json:"provider"`
+	Path     string           `json:"path"`
+}
+
 type workloadDetail struct {
 	Workload  npeval.Workload  `json:"workload"`
 	Isolation npeval.Isolation `json:"isolation"`
 	Policies  []policyView     `json:"policies"`
 	Ingress   npeval.Effective `json:"ingress"`
 	Egress    npeval.Effective `json:"egress"`
+
+	// Rules maps every rule identifier appearing in the effective sets above to
+	// the policy responsible, so a rule can be labelled with a name rather than
+	// an identifier.
+	Rules map[npeval.RuleID]ruleRef `json:"rules,omitempty"`
+
+	// ClosestMisses lists the policies in this namespace that did not select
+	// the workload, nearest first. It is what the "no policy selects this"
+	// state exists to answer: not that nothing matched, but what almost did.
+	ClosestMisses []npeval.Miss `json:"closestMisses,omitempty"`
 }
 
 func (s *Server) handleWorkload(w http.ResponseWriter, r *http.Request) {
@@ -154,10 +177,12 @@ func (s *Server) handleWorkload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail := workloadDetail{
-		Workload:  *found,
-		Isolation: e.Isolation(found.Ref),
-		Ingress:   e.Effective(found.Ref, npeval.DirIngress),
-		Egress:    e.Effective(found.Ref, npeval.DirEgress),
+		Workload:      *found,
+		Isolation:     e.Isolation(found.Ref),
+		Ingress:       e.Effective(found.Ref, npeval.DirIngress),
+		Egress:        e.Effective(found.Ref, npeval.DirEgress),
+		Rules:         map[npeval.RuleID]ruleRef{},
+		ClosestMisses: e.ClosestMisses(found.Ref),
 	}
 	for _, m := range e.PoliciesFor(found.Ref) {
 		p, ok := e.Snapshot().Policy(m.Policy)
@@ -171,6 +196,15 @@ func (s *Server) handleWorkload(w http.ResponseWriter, r *http.Request) {
 			Selector: p.Selector.String(),
 			YAML:     rawYAML(p.Raw),
 		})
+		for _, dir := range []npeval.Direction{npeval.DirIngress, npeval.DirEgress} {
+			for _, rule := range p.Rules(dir) {
+				detail.Rules[rule.ID] = ruleRef{
+					Policy:   p.Ref,
+					Provider: p.Provider,
+					Path:     rule.Path,
+				}
+			}
+		}
 	}
 
 	s.writeJSON(w, http.StatusOK, detail)

@@ -447,3 +447,100 @@ func TestSimulateRejectsMalformedQueries(t *testing.T) {
 		})
 	}
 }
+
+// TestSimulateApproximateAllowance covers the fourth state the verdict scale
+// shows.
+//
+// Approximate is not "this rule mentions a domain". A domain rule matched
+// against a domain name is decided completely — the wildcard either covers the
+// name or it does not — and hedging there would teach people to stop reading
+// the verdict.
+//
+// It is the case where two providers have to be combined and the combination
+// itself cannot be decided: an ipBlock says 0.0.0.0/0 and an
+// ApplicationNetworkPolicy says *.s3.us-east-1.amazonaws.com, and whether the
+// intersection contains the address a name resolves to is a runtime fact.
+// Intersect mode means both must permit, so the answer leans on a comparison
+// Marsad cannot make.
+func TestSimulateApproximateAllowance(t *testing.T) {
+	e := build(t,
+		namespace("prod"),
+		deploy("prod", "api", "app", "api"),
+		netpol("prod", "egress-anywhere", networkingv1.NetworkPolicySpec{
+			PodSelector: *sel("app", "api"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{
+				To:    []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}},
+				Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
+			}},
+		}),
+		anp("prod", "aws-egress", awsv1alpha1.ApplicationNetworkPolicySpec{
+			PodSelector: *sel("app", "api"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
+				To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
+					DomainNames: []string{"*.s3.us-east-1.amazonaws.com"},
+				}},
+				Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
+			}},
+		}),
+	)
+
+	v, err := e.Simulate(npeval.Query{
+		From:     workloadEP("prod", "api"),
+		To:       npeval.Endpoint{Domain: "bucket.s3.us-east-1.amazonaws.com"},
+		Protocol: npeval.ProtocolTCP,
+		Port:     443,
+	})
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+
+	if !v.Allowed {
+		t.Fatalf("expected the combined layers to allow this name: %s", v.Egress.Explain)
+	}
+	if v.Undecidable {
+		t.Error("a name matched against a name is decidable; UNDECIDABLE is for name versus address")
+	}
+	if !v.Approximate || !v.Egress.Approximate {
+		t.Errorf("expected the allowance to be marked approximate, got %+v", v.Egress)
+	}
+	if !strings.Contains(v.Egress.Explain, "depends on DNS resolution") {
+		t.Errorf("the explanation should say why it is approximate: %q", v.Egress.Explain)
+	}
+}
+
+// TestSimulateExactAllowanceIsNotApproximate keeps the flag meaningful: a
+// pod-to-pod rule is decided completely, and marking it approximate would make
+// the badge noise.
+func TestSimulateExactAllowanceIsNotApproximate(t *testing.T) {
+	e := build(t,
+		namespace("prod"),
+		deploy("prod", "api", "app", "api"),
+		deploy("prod", "web", "app", "web"),
+		netpol("prod", "allow-web", networkingv1.NetworkPolicySpec{
+			PodSelector: *sel("app", "api"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From:  []networkingv1.NetworkPolicyPeer{{PodSelector: sel("app", "web")}},
+				Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(8080)}},
+			}},
+		}),
+	)
+
+	v, err := e.Simulate(npeval.Query{
+		From:     workloadEP("prod", "web"),
+		To:       workloadEP("prod", "api"),
+		Protocol: npeval.ProtocolTCP,
+		Port:     8080,
+	})
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	if !v.Allowed {
+		t.Fatalf("expected allowed, got %s", v.Summary)
+	}
+	if v.Approximate || v.Ingress.Approximate {
+		t.Error("a pod-to-pod rule is decided completely and must not read as approximate")
+	}
+}

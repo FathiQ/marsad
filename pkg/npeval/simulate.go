@@ -185,6 +185,17 @@ type Decision struct {
 	Via     []RuleID          `json:"via,omitempty"`
 	Explain string            `json:"explain"`
 	ByLayer map[string]Result `json:"byLayer,omitempty"`
+
+	// Approximate marks an allowance that was decided, but by a rule whose
+	// extent configuration alone cannot pin down — a domain wildcard, whose
+	// runtime addresses Marsad never sees.
+	//
+	// It is deliberately not a fourth Result. The question "is this permitted"
+	// was answered here, and answering it "approximately" would be the kind of
+	// hedging that teaches people to stop reading the verdict. What is
+	// approximate is the *reach of the rule*, not the decision, and a reader
+	// deciding whether to trust this should be told which.
+	Approximate bool `json:"approximate,omitempty"`
 }
 
 // Verdict is the full answer: a connection needs the source's egress and the
@@ -196,6 +207,12 @@ type Verdict struct {
 	Egress      Decision `json:"egress"`
 	Ingress     Decision `json:"ingress"`
 	Summary     string   `json:"summary"`
+
+	// Approximate is set when the connection is allowed, but at least one half
+	// leans on a rule whose extent depends on DNS. Allowed and Approximate are
+	// both true in that case: it is permitted, and the permission is wider or
+	// narrower at runtime than the configuration can say.
+	Approximate bool `json:"approximate,omitempty"`
 }
 
 // Simulate evaluates whether a connection would be permitted by declared policy.
@@ -219,6 +236,7 @@ func (e *Evaluator) Simulate(q Query) (Verdict, error) {
 	v.Allowed = !v.Undecidable &&
 		v.Egress.Result != ResultDenied &&
 		v.Ingress.Result != ResultDenied
+	v.Approximate = v.Allowed && (v.Egress.Approximate || v.Ingress.Approximate)
 
 	switch {
 	case v.Undecidable:
@@ -263,21 +281,31 @@ func (e *Evaluator) decide(subject, other Endpoint, dir Direction, q Query) Deci
 	}
 
 	var via []RuleID
+	approximate := false
 	for _, a := range eff.Allows {
 		if peerMatches(a.Peer, other) && portsAllow(a.Ports, q.Protocol, q.Port) {
 			via = append(via, a.Via...)
+			// The match itself is decided — a wildcard either covers this name or
+			// it does not — but what that wildcard resolves to at runtime is not
+			// something Marsad can see.
+			approximate = approximate || a.Approximate
 		}
 	}
 	if len(via) > 0 {
 		slices.Sort(via)
 		via = slices.Compact(via)
+		explain := fmt.Sprintf("%s %s to %s on %d/%s allowed by %s",
+			ref, dir, other, q.Port, q.Protocol, joinRuleIDs(via))
+		if approximate {
+			explain += "; that rule names a domain, and which addresses it covers depends on DNS resolution, which Marsad does not observe"
+		}
 		return Decision{
-			Result:  ResultAllowed,
-			Reason:  ReasonMatchedRule,
-			Via:     via,
-			ByLayer: byLayer,
-			Explain: fmt.Sprintf("%s %s to %s on %d/%s allowed by %s",
-				ref, dir, other, q.Port, q.Protocol, joinRuleIDs(via)),
+			Result:      ResultAllowed,
+			Reason:      ReasonMatchedRule,
+			Via:         via,
+			ByLayer:     byLayer,
+			Approximate: approximate,
+			Explain:     explain,
 		}
 	}
 
