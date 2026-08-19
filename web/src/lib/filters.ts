@@ -16,6 +16,10 @@ export interface Filters {
   hideDNS: boolean
   onlyUnprotected: boolean
   hideIsolatedNodes: boolean
+  /** Only workloads something outside the cluster can reach. Distinct from
+   * unprotected: a workload can be selected by policies and still accept from
+   * 0.0.0.0/0, which is a decision somebody made rather than one nobody did. */
+  onlyExposed: boolean
 }
 
 export const ALL_EDGE_KINDS: EdgeKind[] = ['allowed', 'approximate', 'default']
@@ -27,6 +31,7 @@ export const defaultFilters = (): Filters => ({
   onlyUnprotected: false,
   // Off by default: a node with no edges is usually the finding, not clutter.
   hideIsolatedNodes: false,
+  onlyExposed: false,
 })
 
 export function isUnprotectedNode(node: GraphNode): boolean {
@@ -51,6 +56,9 @@ export function applyFilters(graph: Graph, filters: Filters): Graph {
   const keptNodes = graph.nodes.filter((n) => {
     if (filters.onlyUnprotected && (n.kind === 'workload' || n.kind === 'namespace')) {
       if (!isUnprotectedNode(n)) return false
+    }
+    if (filters.onlyExposed && (n.kind === 'workload' || n.kind === 'namespace')) {
+      if (!n.exposed) return false
     }
     if (filters.workloadKinds.size > 0 && n.kind === 'workload') {
       if (!n.workloadKind || !filters.workloadKinds.has(n.workloadKind)) return false

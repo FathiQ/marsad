@@ -29,6 +29,7 @@ import { EdgePopover } from './components/EdgePopover'
 import { FilterRail } from './components/FilterRail'
 import { GraphCanvas, type GraphControls } from './components/GraphCanvas'
 import { Inspector } from './components/Inspector'
+import { Minimap } from './components/Minimap'
 import { Splash } from './components/Splash'
 import { SimulatePanel, type Prefill } from './components/SimulatePanel'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -135,12 +136,21 @@ export default function App() {
   /** Where the pointer landed, so the popover is anchored to the click. */
   const [edgeAt, setEdgeAt] = useState<{ x: number; y: number } | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
+  /** The node the *server* is reducing the graph around, distinct from focusId,
+   * which only aims the camera. One changes what is drawn; the other changes
+   * where you are looking at it from. */
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
 
   const query = useMemo(
-    () => ({ level, namespaces: selectedNs, includeDefault }),
-    [level, selectedNs, includeDefault],
+    () => ({
+      level,
+      namespaces: selectedNs,
+      includeDefault,
+      focus: focusNodeId ?? undefined,
+    }),
+    [level, selectedNs, includeDefault, focusNodeId],
   )
 
   const loadSummaries = useCallback(async () => {
@@ -255,6 +265,13 @@ export default function App() {
         e.preventDefault()
         setSimulateOpen(true)
       }
+      // F reduces the graph to what surrounds the selection. On a cluster with
+      // 200 workloads the whole picture is not a picture, and this is the way
+      // back to one.
+      if (e.key === 'f' && !typing && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setFocusNodeId((cur) => (cur ? null : (selectedNode?.id ?? null)))
+      }
       if (e.key === 'Escape' && !typing) {
         setSelectedNode(null)
         setSelectedEdge(null)
@@ -263,7 +280,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [selectedNode])
 
   const palette = useMemo(
     () => buildNamespacePalette(namespaces.map((ns) => ns.name)),
@@ -287,12 +304,14 @@ export default function App() {
         includeDefault,
         selectedNs.join(','),
         filters.onlyUnprotected,
+        filters.onlyExposed,
+        focusNodeId ?? '',
         filters.hideIsolatedNodes,
         filters.hideDNS,
         [...filters.workloadKinds].sort().join(','),
         [...filters.edgeKinds].sort().join(','),
       ].join('|'),
-    [level, includeDefault, selectedNs, filters],
+    [level, includeDefault, selectedNs, filters, focusNodeId],
   )
   const hidden = graph && filtered ? hiddenCount(graph, filtered) : 0
   const workloadKinds = useMemo(() => presentWorkloadKinds(graph), [graph])
@@ -468,6 +487,52 @@ export default function App() {
                 </Overlay>
               )}
 
+              {/* Drawing a tenth of a cluster without saying so is worse than
+                  drawing all of it. The counts come from the build, not from
+                  what survived the filters. */}
+              {graph?.focus && (
+                <div className="glass rim absolute top-3.5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-accent/40 px-3.5 py-1.5 text-[12px]">
+                  <span className="text-text-body">
+                    Focused on{' '}
+                    <span className="font-medium text-fg">
+                      {nodesById.get(graph.focus.node)?.label ?? graph.focus.node}
+                    </span>
+                    <span className="px-1.5 opacity-50">·</span>
+                    <span className="num">{graph.focus.hops}</span> hops
+                    <span className="px-1.5 opacity-50">·</span>
+                    <span className="num">{graph.focus.namespaces}</span> of{' '}
+                    <span className="num">{graph.focus.totalNamespaces}</span> namespaces drawn
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => setFocusNodeId(null)}>
+                    Clear focus
+                  </Button>
+                </div>
+              )}
+
+              {/* Refused, and says why. Drawing it would produce a hairball no
+                  amount of panning recovers, and letting somebody discover that
+                  for themselves is not a kindness. */}
+              {graph?.oversize && (
+                <Overlay icon={Telescope} title="Too much to draw at once">
+                  <p>
+                    This view has <span className="num">{graph.oversize.nodes}</span> nodes. Past
+                    about <span className="num">{graph.oversize.limit}</span> a node-link diagram
+                    stops being readable, so Marsad has not drawn one — the picture would be the
+                    problem, not the answer.
+                  </p>
+                  <div className="mt-3.5 flex justify-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setPaletteOpen(true)}>
+                      Search for a workload
+                    </Button>
+                    {level === 'workload' && (
+                      <Button size="sm" variant="ghost" onClick={() => setLevel('namespace')}>
+                        Show namespaces instead
+                      </Button>
+                    )}
+                  </div>
+                </Overlay>
+              )}
+
               {/* A stale graph looks exactly like a live one, so when the stream
                   is not live the canvas says so rather than leaving the header
                   badge to carry it alone. */}
@@ -571,6 +636,10 @@ export default function App() {
                   )}
                 </Overlay>
               )}
+
+              {/* Only when there is enough graph for "where am I" to be a
+                  question worth answering. */}
+              {filtered && filtered.nodes.length > 12 && <Minimap controls={graphControls} />}
 
               <Inspector
                 node={selectedNode}

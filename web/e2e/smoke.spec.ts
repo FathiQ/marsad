@@ -1405,3 +1405,109 @@ test('an unreachable cluster is not offered a ClusterRole', async ({ page }) => 
   await expect(page.getByText('The cluster could not be reached')).toBeVisible()
   await expect(page.getByText('The ClusterRole it needs')).toBeHidden()
 })
+
+/* ------------------------------------------------------------------- scale */
+
+const manyNodes = (n: number) => ({
+  level: 'workload',
+  nodes: Array.from({ length: n }, (_, i) => ({
+    id: `wl:corp/Deployment/svc-${i}`,
+    kind: 'workload',
+    label: `svc-${i}`,
+    namespace: 'corp',
+    workloadKind: 'Deployment',
+    replicas: 1,
+    isolation: { ingress: i % 3 !== 0, egress: true },
+  })),
+  edges: [],
+})
+
+test('a graph too large to read is refused, not shipped', async ({ page }) => {
+  // Past the limit the layout is a hairball no amount of panning recovers, and
+  // sending it only moves the discovery to the browser.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: { level: 'workload', nodes: [], edges: [], oversize: { nodes: 400, limit: 220 } },
+      },
+    }),
+  )
+  await page.reload()
+
+  await expect(page.getByText('Too much to draw at once')).toBeVisible()
+  await expect(page.getByText(/400/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Search for a workload' })).toBeVisible()
+})
+
+test('a focused graph says how much it is not showing', async ({ page }) => {
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: {
+          ...manyNodes(14),
+          focus: {
+            node: 'wl:corp/Deployment/svc-0',
+            hops: 2,
+            namespaces: 9,
+            totalNamespaces: 42,
+            workloads: 14,
+            totalWorkloads: 96,
+            hidden: 82,
+          },
+        },
+      },
+    }),
+  )
+  await page.reload()
+
+  await expect(page.getByText(/Focused on/)).toBeVisible()
+  await expect(page.getByText(/9 of 42 namespaces drawn/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear focus' })).toBeVisible()
+})
+
+test('the minimap appears once there is enough graph to get lost in', async ({ page }) => {
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: manyNodes(20) } }),
+  )
+  await page.reload()
+  await expect(page.getByLabel('Minimap')).toBeVisible()
+})
+
+test('the rail can be filtered, and says when nothing matches', async ({ page }) => {
+  await page.route('**/api/namespaces', (r) =>
+    r.fulfill({
+      json: Array.from({ length: 8 }, (_, i) => ({
+        name: `ns-${i}`,
+        workloads: 2,
+        policies: 1,
+        unprotected: 0,
+      })),
+    }),
+  )
+  await page.reload()
+
+  const rail = page.getByRole('complementary')
+  const field = rail.getByLabel('Filter namespaces')
+  await expect(field).toBeVisible()
+
+  await field.fill('ns-3')
+  await expect(rail.getByRole('button', { name: /ns-3/ })).toBeVisible()
+  await expect(rail.getByRole('button', { name: /ns-4/ })).toBeHidden()
+
+  await field.fill('nothing-like-this')
+  await expect(rail.getByText('No namespace matches.')).toBeVisible()
+})
+
+test('only-reachable-from-outside is its own question', async ({ page }) => {
+  // Distinct from unprotected: a workload can be selected by policies and still
+  // accept from 0.0.0.0/0, which is a decision somebody made rather than one
+  // nobody did.
+  await page.getByRole('button', { name: 'Filters' }).click()
+  const row = page.getByText('Only reachable from outside')
+  await expect(row).toBeVisible()
+
+  await row.click()
+  await expect(page.getByText(/Filters are hiding part of this/)).toBeVisible()
+})

@@ -149,6 +149,9 @@ interface Card {
    * saying so. Distinct from `unprotected`, which a namespace card also sets
    * when any workload inside it qualifies. */
   noPolicy: boolean
+  /** The counted stand-in for everything focus left out. */
+  hidden?: boolean
+  hiddenNamespaces?: number
   w: number
   h: number
 }
@@ -422,6 +425,8 @@ export class OverlayRenderer {
         openIn: open.in,
         openOut: open.out,
         noPolicy,
+        hidden: n.hidden,
+        hiddenNamespaces: n.namespaces,
         // Wider than a plain card: "any port  from anywhere" has to fit on one
         // line, because wrapping it would bury the half that says "anywhere".
         w: Math.max(w, exposureRows ? 214 : 0),
@@ -1061,15 +1066,31 @@ export class OverlayRenderer {
       ctx.font = `600 ${Math.round(10 * scale)}px ${SANS_STACK}`
       const badgeW = card.noPolicy
         ? ctx.measureText(NO_POLICY_LABEL).width + 14 * scale
-        : card.count > 1
+        : card.count > 1 && !card.hidden
           ? 26 * scale
           : 0
 
       ctx.font = `600 ${Math.round(13 * scale)}px ${SANS_STACK}`
-      ctx.fillStyle = fg
+      ctx.fillStyle = card.hidden ? muted : fg
       ctx.textBaseline = 'middle'
       const room = x + w - PAD_X * scale - badgeW - cursor
-      ctx.fillText(truncate(ctx, card.label, room), cursor, headerY)
+
+      // The stand-in for everything focus excluded says what it stands for.
+      // "elsewhere" alone would be a node you cannot act on and cannot count.
+      const heading = card.hidden
+        ? `${card.hiddenNamespaces ?? 0} more namespaces`
+        : card.label
+      ctx.fillText(truncate(ctx, heading, room), cursor, headerY)
+
+      if (card.hidden) {
+        ctx.font = `500 ${Math.round(10.5 * scale)}px ${SANS_STACK}`
+        ctx.fillStyle = paint('faint')
+        ctx.fillText(
+          truncate(ctx, `${card.count} nodes not drawn`, room),
+          cursor,
+          headerY + 13 * scale,
+        )
+      }
 
       if (card.noPolicy) {
         const bh = 16 * scale

@@ -86,7 +86,149 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 		}
 		g.Edges = append(g.Edges, *e)
 	}
+
+	// Marked before focus narrows anything: whether the internet can reach a
+	// workload is a fact about the cluster, not about what is currently on
+	// screen, and computing it after focus would make it change as you look
+	// around.
+	exposed := ReachableFromOutside(g)
+	if len(exposed) > 0 {
+		reach := make(map[string]bool, len(exposed))
+		for _, id := range exposed {
+			reach[id] = true
+		}
+		for i := range g.Nodes {
+			g.Nodes[i].Exposed = reach[g.Nodes[i].ID]
+		}
+	}
+
+	if opts.Focus != "" {
+		applyFocus(g, opts.Focus, opts.FocusHops)
+	}
 	return g
+}
+
+// MaxDrawableNodes is where a graph stops being a picture.
+//
+// Past this the layout is a hairball and no amount of panning recovers it, so
+// the honest response is to refuse and say why — offering focus or search —
+// rather than to draw it and let somebody discover it is unreadable. Chosen to
+// sit above any namespace-level view and above a workload-level view of a
+// normal cluster, so it only fires where it means something.
+const MaxDrawableNodes = 220
+
+// Oversized reports whether a graph is too large to draw, replacing its
+// contents with a count. Called by the server rather than by Build, so a caller
+// that genuinely wants everything — an export, a test — still gets it.
+func (g *Graph) Oversized() bool {
+	if len(g.Nodes) <= MaxDrawableNodes {
+		return false
+	}
+	g.Oversize = &Oversize{Nodes: len(g.Nodes), Limit: MaxDrawableNodes}
+	g.Nodes = nil
+	g.Edges = nil
+	return true
+}
+
+// applyFocus reduces a built graph to one node's neighbourhood, folding what is
+// left out into counted cluster nodes.
+//
+// Reduced after building rather than during it, because "within two hops" is a
+// question about the finished graph: which nodes are adjacent depends on which
+// edges survived peer collapsing and port merging, and those are decided by the
+// build. Doing it earlier would answer a slightly different question that
+// happens to look the same on small inputs.
+func applyFocus(g *Graph, focus string, hops int) {
+	if hops <= 0 {
+		hops = DefaultFocusHops
+	}
+
+	byID := make(map[string]Node, len(g.Nodes))
+	namespaces := map[string]bool{}
+	workloads := 0
+	for _, n := range g.Nodes {
+		byID[n.ID] = n
+		if n.Namespace != "" {
+			namespaces[n.Namespace] = true
+		}
+		if n.Kind == NodeWorkload {
+			workloads++
+		}
+	}
+	if _, ok := byID[focus]; !ok {
+		// Focusing on something that is not drawn would empty the graph and
+		// look like a bug in the data rather than a stale request.
+		return
+	}
+
+	keep := withinHops(g.Edges, focus, hops)
+
+	kept := make([]Node, 0, len(keep))
+	keptNamespaces := map[string]bool{}
+	keptWorkloads := 0
+	// Namespaces that lost every node, counted so the cluster card can say how
+	// many places are not being shown rather than only how many nodes.
+	dropped := map[string]int{}
+
+	for _, n := range g.Nodes {
+		if _, in := keep[n.ID]; in {
+			kept = append(kept, n)
+			if n.Namespace != "" {
+				keptNamespaces[n.Namespace] = true
+			}
+			if n.Kind == NodeWorkload {
+				keptWorkloads++
+			}
+			continue
+		}
+		where := n.Namespace
+		if where == "" {
+			where = string(n.Kind)
+		}
+		dropped[where]++
+	}
+
+	hidden := len(g.Nodes) - len(kept)
+	if hidden > 0 {
+		// One card for everything excluded, rather than nothing at all. A graph
+		// that silently shows a tenth of a cluster is worse than one that shows
+		// a tenth and says so.
+		hiddenNamespaces := 0
+		for ns := range dropped {
+			if !keptNamespaces[ns] {
+				hiddenNamespaces++
+			}
+		}
+		kept = append(kept, Node{
+			ID:         "cluster:hidden",
+			Kind:       NodeNamespace,
+			Label:      "elsewhere",
+			Hidden:     true,
+			Workloads:  hidden,
+			Namespaces: hiddenNamespaces,
+		})
+	}
+
+	keptEdges := make([]Edge, 0, len(g.Edges))
+	for _, e := range g.Edges {
+		_, s := keep[e.Source]
+		_, t := keep[e.Target]
+		if s && t {
+			keptEdges = append(keptEdges, e)
+		}
+	}
+
+	g.Nodes = kept
+	g.Edges = keptEdges
+	g.Focus = &Focus{
+		Node:            focus,
+		Hops:            hops,
+		Namespaces:      len(keptNamespaces),
+		TotalNamespaces: len(namespaces),
+		Workloads:       keptWorkloads,
+		TotalWorkloads:  workloads,
+		Hidden:          hidden,
+	}
 }
 
 func (b *builder) inScope(namespace string) bool {
@@ -237,8 +379,13 @@ func (b *builder) peerNodes(p npeval.ResolvedPeer) []string {
 		}
 		id := peerNodeID(kind, p.CIDR.String())
 		display := p.Display
+		public := isPublic(p.CIDR)
 		return []string{b.node(id, func() Node {
-			return Node{Kind: kind, Label: shortLabel(orDefault(display, label), 48)}
+			return Node{
+				Kind:   kind,
+				Label:  shortLabel(orDefault(display, label), 48),
+				Public: public,
+			}
 		}).ID}
 
 	case npeval.PeerDomain:
