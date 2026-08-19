@@ -565,7 +565,7 @@ func TestCrossProviderLayers(t *testing.T) {
 				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 				Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
 					To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
-						DomainNames: []string{"*.s3.me-south-1.amazonaws.com"},
+						DomainNames: []string{"*.s3.us-east-1.amazonaws.com"},
 					}},
 					Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
 				}},
@@ -577,7 +577,7 @@ func TestCrossProviderLayers(t *testing.T) {
 			t.Fatalf("got %v", allowSummary(eff))
 		}
 		a := eff.Allows[0]
-		if a.Peer.Kind != npeval.PeerDomain || a.Peer.Domain != "*.s3.me-south-1.amazonaws.com" {
+		if a.Peer.Kind != npeval.PeerDomain || a.Peer.Domain != "*.s3.us-east-1.amazonaws.com" {
 			t.Errorf("got peer %+v", a.Peer)
 		}
 		if !a.Approximate || a.Note == "" {
@@ -600,7 +600,7 @@ func TestDomainPeerExpansion(t *testing.T) {
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 			Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
 				To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
-					DomainNames: []string{"*.s3.me-south-1.amazonaws.com", "sts.amazonaws.com"},
+					DomainNames: []string{"*.s3.us-east-1.amazonaws.com", "sts.amazonaws.com"},
 				}},
 				Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
 			}},
@@ -609,7 +609,7 @@ func TestDomainPeerExpansion(t *testing.T) {
 
 	got := allowSummary(e.Effective(api, npeval.DirEgress))
 	want := []string{
-		"*.s3.me-south-1.amazonaws.com => 443/TCP",
+		"*.s3.us-east-1.amazonaws.com => 443/TCP",
 		"sts.amazonaws.com => 443/TCP",
 	}
 	if !reflect.DeepEqual(got, want) {

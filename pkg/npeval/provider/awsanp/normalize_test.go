@@ -31,7 +31,7 @@ func egressTo(peers ...awsv1alpha1.ApplicationNetworkPolicyPeer) awsv1alpha1.App
 // each keeps the index it came from for traceability.
 func TestDomainNamesExpandToOnePeerEach(t *testing.T) {
 	p, err := awsanp.NormalizePolicy(anp(egressTo(awsv1alpha1.ApplicationNetworkPolicyPeer{
-		DomainNames: []string{"*.s3.me-south-1.amazonaws.com", "STS.Amazonaws.com."},
+		DomainNames: []string{"*.s3.us-east-1.amazonaws.com", "STS.Amazonaws.com."},
 	})))
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestDomainNamesExpandToOnePeerEach(t *testing.T) {
 	if len(peers) != 2 {
 		t.Fatalf("got %d peers, want one per domain", len(peers))
 	}
-	for i, want := range []string{"*.s3.me-south-1.amazonaws.com", "sts.amazonaws.com"} {
+	for i, want := range []string{"*.s3.us-east-1.amazonaws.com", "sts.amazonaws.com"} {
 		if peers[i].Kind != npeval.PeerDomain {
 			t.Errorf("peer %d kind = %v", i, peers[i].Kind)
 		}
@@ -113,7 +113,7 @@ func TestDomainNameValidation(t *testing.T) {
 		"kubernetes.io",
 		"blog.kubernetes.io",
 		"*.kubernetes.io",
-		"*.s3.me-south-1.amazonaws.com",
+		"*.s3.us-east-1.amazonaws.com",
 		"kubernetes.io.",
 		"my-service.example.com",
 	}

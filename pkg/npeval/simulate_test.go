@@ -227,7 +227,7 @@ func TestSimulateExternalEndpoints(t *testing.T) {
 				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 				Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
 					To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
-						DomainNames: []string{"*.s3.me-south-1.amazonaws.com"},
+						DomainNames: []string{"*.s3.us-east-1.amazonaws.com"},
 					}},
 					Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
 				}},
@@ -235,7 +235,7 @@ func TestSimulateExternalEndpoints(t *testing.T) {
 
 		v, err := e.Simulate(npeval.Query{
 			From:     workloadEP("prod", "api"),
-			To:       npeval.Endpoint{Domain: "my-bucket.s3.me-south-1.amazonaws.com"},
+			To:       npeval.Endpoint{Domain: "my-bucket.s3.us-east-1.amazonaws.com"},
 			Protocol: npeval.ProtocolTCP, Port: 443,
 		})
 		if err != nil {
@@ -255,7 +255,7 @@ func TestSimulateExternalEndpoints(t *testing.T) {
 				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 				Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
 					To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
-						DomainNames: []string{"*.s3.me-south-1.amazonaws.com"},
+						DomainNames: []string{"*.s3.us-east-1.amazonaws.com"},
 					}},
 					Ports: []networkingv1.NetworkPolicyPort{{Port: portNum(443)}},
 				}},
@@ -286,7 +286,7 @@ func TestSimulateExternalEndpoints(t *testing.T) {
 				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 				Egress: []awsv1alpha1.ApplicationNetworkPolicyEgressRule{{
 					To: []awsv1alpha1.ApplicationNetworkPolicyPeer{{
-						DomainNames: []string{"*.s3.me-south-1.amazonaws.com"},
+						DomainNames: []string{"*.s3.us-east-1.amazonaws.com"},
 					}},
 				}},
 			}))...)
