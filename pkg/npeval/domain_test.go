@@ -37,8 +37,8 @@ func TestMatchDomain(t *testing.T) {
 		{"empty pattern", "", "kubernetes.io", false},
 		{"empty domain", "*.kubernetes.io", "", false},
 
-		{"regional s3 wildcard", "*.s3.me-south-1.amazonaws.com", "logs.s3.me-south-1.amazonaws.com", true},
-		{"regional wildcard rejects other region", "*.s3.me-south-1.amazonaws.com", "logs.s3.eu-west-1.amazonaws.com", false},
+		{"regional s3 wildcard", "*.s3.us-east-1.amazonaws.com", "logs.s3.us-east-1.amazonaws.com", true},
+		{"regional wildcard rejects other region", "*.s3.us-east-1.amazonaws.com", "logs.s3.eu-west-1.amazonaws.com", false},
 	}
 
 	for _, tt := range tests {
@@ -109,7 +109,7 @@ func TestDomainLabels(t *testing.T) {
 	}{
 		{"*.amazonaws.com", 2},
 		{"*.s3.amazonaws.com", 3},
-		{"*.s3.me-south-1.amazonaws.com", 4},
+		{"*.s3.us-east-1.amazonaws.com", 4},
 		{"kubernetes.io", 2},
 		{"", 0},
 	}

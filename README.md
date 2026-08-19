@@ -92,12 +92,16 @@ it draws, it can point at the exact rule that produced it.
 Marsad needs read access to a cluster and nothing else.
 
 ```sh
-helm install marsad oci://ghcr.io/fathiq/charts/marsad --version 0.1.3 \
+helm install marsad oci://ghcr.io/fathiq/charts/marsad \
   --namespace marsad --create-namespace
 
 kubectl -n marsad port-forward svc/marsad 8080:80
 open http://localhost:8080
 ```
+
+That installs the latest chart. Add `--version <x.y.z>` to pin one, which is
+worth doing anywhere the install is meant to be reproducible; the released
+versions are in [CHANGELOG.md](CHANGELOG.md).
 
 The chart is an OCI artifact, so there is no `helm repo add` step. Helm 3.8 or
 newer. See [charts/marsad](charts/marsad) for the values it takes and
@@ -166,7 +170,8 @@ non-root with no shell and no package manager.
 
 To report a vulnerability, please open a
 [security advisory](https://github.com/FathiQ/marsad/security/advisories/new)
-rather than a public issue.
+rather than a public issue. [SECURITY.md](SECURITY.md) says what is in scope and
+what to expect.
 
 ## Development
 
