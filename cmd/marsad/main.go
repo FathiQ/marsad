@@ -27,6 +27,15 @@ import (
 // what it was, which turned "is this the fixed build?" into guesswork twice.
 var version = "dev"
 
+// firstFault prefers whichever failure actually happened first: preflight runs
+// before any watch, so if it found something the watch errors are consequences.
+func firstFault(preflight, watch *cluster.Fault) *cluster.Fault {
+	if preflight != nil {
+		return preflight
+	}
+	return watch
+}
+
 func main() {
 	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("marsad exited", "error", err)
@@ -64,12 +73,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Fail fast and legibly on bad credentials, rather than letting client-go
-	// retry forever while the process looks healthy.
-	if err := cluster.Preflight(clients); err != nil {
-		return err
+	/*
+	 * A cluster Marsad cannot read is a screen, not a crash.
+	 *
+	 * This used to return, which exits, which in a Deployment is
+	 * CrashLoopBackOff — and a pod that never starts shows its error to nobody
+	 * except whoever thinks to run `kubectl logs`. Marsad's entire job is to
+	 * show you things about your cluster, and "I am not allowed to read your
+	 * Deployments, here is the ClusterRole that would fix it" is one of those
+	 * things. So the UI comes up either way and says so.
+	 */
+	fault := cluster.Preflight(clients)
+	if fault != nil {
+		log.Error("cannot read the cluster",
+			"kind", fault.Kind, "host", fault.Host, "error", fault.Message)
+	} else {
+		log.Info("connected to cluster", "host", clients.Host, "version", cluster.ServerVersion(clients))
 	}
-	log.Info("connected to cluster", "host", clients.Host, "version", cluster.ServerVersion(clients))
 
 	caps := cluster.Detect(clients.Discovery)
 	for _, p := range caps.Policies {
@@ -84,7 +104,9 @@ func run() error {
 
 	watcher := cluster.NewWatcher(clients, caps, log)
 	watchErr := make(chan error, 1)
-	go func() { watchErr <- watcher.Run(ctx) }()
+	if fault == nil {
+		go func() { watchErr <- watcher.Run(ctx) }()
+	}
 
 	srv := &http.Server{
 		Addr: *addr,
@@ -94,6 +116,7 @@ func run() error {
 			CombineMode: combine,
 			DevCORS:     *devCORS,
 			Version:     version,
+			Fault:       func() *cluster.Fault { return firstFault(fault, watcher.Fault()) },
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -115,7 +138,15 @@ func run() error {
 		return err
 	case err := <-watchErr:
 		if err != nil && !errors.Is(err, context.Canceled) {
-			return fmt.Errorf("cluster watch: %w", err)
+			// Same reasoning as the preflight fault: the commonest cause is a
+			// token that cannot list something, the watch handler has already
+			// recorded the API server's own words, and exiting would replace a
+			// screen that explains it with a restart loop that does not.
+			log.Error("cluster watch stopped", "error", err)
+			if watcher.Fault() == nil {
+				fault = cluster.NewFault(err, clients.Host)
+			}
+			<-ctx.Done()
 		}
 	}
 

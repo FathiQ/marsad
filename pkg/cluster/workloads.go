@@ -9,6 +9,15 @@ import (
 	"github.com/FathiQ/marsad/pkg/npeval"
 )
 
+// The API groups Marsad reads from. Named because they appear both as an
+// ObjectRef's group and as an RBAC apiGroup, and those two have to agree: a
+// typo in one would produce a ClusterRole that grants access to something the
+// code never asks for, and no access to something it does.
+const (
+	groupApps  = "apps"
+	groupBatch = "batch"
+)
+
 // A graph node is a controller, not a pod: a Deployment's pods all share the
 // same template labels, so they are selected identically by every policy and
 // drawing them separately would add thousands of nodes without adding
@@ -20,7 +29,7 @@ import (
 
 func workloadFromDeployment(d *appsv1.Deployment) npeval.Workload {
 	return npeval.Workload{
-		Ref:      npeval.ObjectRef{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name},
+		Ref:      npeval.ObjectRef{Group: groupApps, Kind: "Deployment", Namespace: d.Namespace, Name: d.Name},
 		Kind:     npeval.KindDeployment,
 		Labels:   d.Spec.Template.Labels,
 		Replicas: int(d.Status.Replicas),
@@ -30,7 +39,7 @@ func workloadFromDeployment(d *appsv1.Deployment) npeval.Workload {
 
 func workloadFromStatefulSet(s *appsv1.StatefulSet) npeval.Workload {
 	return npeval.Workload{
-		Ref:      npeval.ObjectRef{Group: "apps", Kind: "StatefulSet", Namespace: s.Namespace, Name: s.Name},
+		Ref:      npeval.ObjectRef{Group: groupApps, Kind: "StatefulSet", Namespace: s.Namespace, Name: s.Name},
 		Kind:     npeval.KindStatefulSet,
 		Labels:   s.Spec.Template.Labels,
 		Replicas: int(s.Status.Replicas),
@@ -40,7 +49,7 @@ func workloadFromStatefulSet(s *appsv1.StatefulSet) npeval.Workload {
 
 func workloadFromDaemonSet(d *appsv1.DaemonSet) npeval.Workload {
 	return npeval.Workload{
-		Ref:      npeval.ObjectRef{Group: "apps", Kind: "DaemonSet", Namespace: d.Namespace, Name: d.Name},
+		Ref:      npeval.ObjectRef{Group: groupApps, Kind: "DaemonSet", Namespace: d.Namespace, Name: d.Name},
 		Kind:     npeval.KindDaemonSet,
 		Labels:   d.Spec.Template.Labels,
 		Replicas: int(d.Status.CurrentNumberScheduled),
@@ -50,7 +59,7 @@ func workloadFromDaemonSet(d *appsv1.DaemonSet) npeval.Workload {
 
 func workloadFromJob(j *batchv1.Job) npeval.Workload {
 	return npeval.Workload{
-		Ref:      npeval.ObjectRef{Group: "batch", Kind: "Job", Namespace: j.Namespace, Name: j.Name},
+		Ref:      npeval.ObjectRef{Group: groupBatch, Kind: "Job", Namespace: j.Namespace, Name: j.Name},
 		Kind:     npeval.KindJob,
 		Labels:   j.Spec.Template.Labels,
 		Replicas: int(j.Status.Active),
@@ -61,7 +70,7 @@ func workloadFromJob(j *batchv1.Job) npeval.Workload {
 func workloadFromCronJob(c *batchv1.CronJob) npeval.Workload {
 	tmpl := c.Spec.JobTemplate.Spec.Template
 	return npeval.Workload{
-		Ref:      npeval.ObjectRef{Group: "batch", Kind: "CronJob", Namespace: c.Namespace, Name: c.Name},
+		Ref:      npeval.ObjectRef{Group: groupBatch, Kind: "CronJob", Namespace: c.Namespace, Name: c.Name},
 		Kind:     npeval.KindCronJob,
 		Labels:   tmpl.Labels,
 		Replicas: len(c.Status.Active),
