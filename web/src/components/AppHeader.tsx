@@ -1,6 +1,8 @@
-import { Moon, Route, Search, ShieldCheck, Sun, Wifi, WifiOff } from 'lucide-react'
+import { Moon, RefreshCw, Route, Search, ShieldCheck, Sun } from 'lucide-react'
 
-import type { Capability, Meta } from '../api'
+import { useEffect, useState } from 'react'
+
+import type { Capability, Meta, StreamStatus } from '../api'
 import { cn } from '../lib/cn'
 import { Mark } from './Mark'
 import { Badge } from './ui/badge'
@@ -11,7 +13,8 @@ import { Tooltip } from './ui/tooltip'
 
 interface Props {
   meta: Meta | null
-  connected: boolean
+  status: StreamStatus
+  onReconnect: () => void
   unprotected: number
   onlyUnprotected: boolean
   onToggleUnprotected: () => void
@@ -99,9 +102,98 @@ function CapabilityPill({ capability }: { capability: Capability }) {
   )
 }
 
+/** "4 min ago", from a timestamp, ticking without a re-render per second. */
+function useAgo(at: Date | null): string {
+  const [, force] = useState(0)
+  useEffect(() => {
+    if (!at) return
+    const t = window.setInterval(() => force((n) => n + 1), 15_000)
+    return () => window.clearInterval(t)
+  }, [at])
+
+  if (!at) return ''
+  const seconds = Math.max(0, Math.round((Date.now() - at.getTime()) / 1000))
+  if (seconds < 45) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  return `${Math.round(minutes / 60)} h ago`
+}
+
+/**
+ * Whether what is on screen is current.
+ *
+ * A config-reading tool has no other tell. A graph built from a snapshot taken
+ * four minutes ago looks exactly like one built a second ago, and the whole
+ * value of the thing depends on which it is. "offline" used to cover both a
+ * socket that is retrying and one that has given up, which are different
+ * situations calling for different responses from whoever is reading it.
+ */
+function ConnectionBadge({
+  status,
+  onReconnect,
+}: {
+  status: StreamStatus
+  onReconnect: () => void
+}) {
+  const ago = useAgo(status.updatedAt)
+  const [countdown, setCountdown] = useState(0)
+
+  useEffect(() => {
+    if (status.state !== 'reconnecting' || !status.retryAt) return
+    const tick = () =>
+      setCountdown(Math.max(0, Math.ceil((status.retryAt!.getTime() - Date.now()) / 1000)))
+    tick()
+    const t = window.setInterval(tick, 500)
+    return () => window.clearInterval(t)
+  }, [status])
+
+  if (status.state === 'live') {
+    return (
+      <Tooltip content="Streaming live: the graph updates as the cluster changes.">
+        <Badge tone="ok">
+          <span className="size-1.5 rounded-full bg-allowed" />
+          live{ago && ` · updated ${ago}`}
+        </Badge>
+      </Tooltip>
+    )
+  }
+
+  if (status.state === 'reconnecting') {
+    return (
+      <Tooltip content="The update stream dropped. What is on screen is the last graph received.">
+        <Badge tone="warn">
+          <span className="animate-pulse-dot size-1.5 rounded-full bg-approx" />
+          reconnecting{countdown > 0 ? ` · retrying in ${countdown}s` : ''}
+        </Badge>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <Tooltip content="Live updates are stopped. This is a snapshot, and the cluster may have moved on.">
+        <Badge tone="danger">
+          <span className="size-1.5 rounded-full bg-danger" />
+          snapshot
+          {status.updatedAt && (
+            <>
+              <span className="opacity-50">·</span>
+              <span className="num">{status.updatedAt.toLocaleTimeString()}</span>
+            </>
+          )}
+        </Badge>
+      </Tooltip>
+      <Button variant="ghost" size="icon-sm" onClick={onReconnect} aria-label="Reconnect">
+        <RefreshCw />
+      </Button>
+    </div>
+  )
+}
+
 export function AppHeader({
   meta,
-  connected,
+  status,
+  onReconnect,
   unprotected,
   onlyUnprotected,
   onToggleUnprotected,
@@ -173,27 +265,7 @@ export function AppHeader({
         <CapabilityPill key={c.provider} capability={c} />
       ))}
 
-      <Tooltip
-        content={
-          connected
-            ? 'Streaming live: the graph updates as the cluster changes.'
-            : 'The update stream is down. The graph shown is the last one received.'
-        }
-      >
-        <Badge tone={connected ? 'ok' : 'neutral'}>
-          {connected ? (
-            <>
-              <Wifi className="size-3" />
-              live
-            </>
-          ) : (
-            <>
-              <WifiOff className="size-3" />
-              offline
-            </>
-          )}
-        </Badge>
-      </Tooltip>
+      <ConnectionBadge status={status} onReconnect={onReconnect} />
 
       <Button variant="outline" size="icon" onClick={onToggleTheme} aria-label="Toggle theme">
         {theme === 'dark' ? <Moon /> : <Sun />}

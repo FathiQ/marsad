@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldOff, Telescope, TriangleAlert } from 'lucide-react'
 
+import { Button } from './components/ui/button'
+
 import {
   NotReadyError,
   fetchGraph,
+  fetchHealth,
   fetchMeta,
   fetchNamespaces,
   openStream,
@@ -13,6 +16,9 @@ import {
   type Level,
   type Meta,
   type NamespaceSummary,
+  type StreamHandle,
+  type StreamStatus,
+  type SyncStep,
 } from './api'
 import { AppHeader } from './components/AppHeader'
 import { CanvasBar } from './components/CanvasBar'
@@ -101,7 +107,15 @@ export default function App() {
   const [graph, setGraph] = useState<Graph | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(true)
-  const [connected, setConnected] = useState(false)
+  const [status, setStatus] = useState<StreamStatus>({
+    state: 'reconnecting',
+    updatedAt: null,
+    retryAt: null,
+    attempt: 0,
+  })
+  const stream = useRef<StreamHandle | null>(null)
+  /** Sync progress, polled only while the caches are still filling. */
+  const [progress, setProgress] = useState<SyncStep[]>([])
 
   const [level, setLevel] = useState<Level>('namespace')
   const [selectedNs, setSelectedNs] = useState<string[]>([])
@@ -167,7 +181,7 @@ export default function App() {
   }, [query])
 
   useEffect(() => {
-    return openStream(
+    const handle = openStream(
       query,
       (msg) => {
         if (msg.graph) {
@@ -176,9 +190,32 @@ export default function App() {
         }
         void loadSummaries()
       },
-      setConnected,
+      setStatus,
     )
+    stream.current = handle
+    return () => {
+      handle.close()
+      if (stream.current === handle) stream.current = null
+    }
   }, [query, loadSummaries])
+
+  // Polled only while there is nothing to draw. /api/health is the one endpoint
+  // that answers during cache sync, and once it stops mattering the polling
+  // stops with it.
+  useEffect(() => {
+    if (!syncing) return
+    let cancelled = false
+    const tick = () =>
+      void fetchHealth()
+        .then((h) => !cancelled && setProgress(h.progress ?? []))
+        .catch(() => {})
+    tick()
+    const t = window.setInterval(tick, 900)
+    return () => {
+      cancelled = true
+      window.clearInterval(t)
+    }
+  }, [syncing])
 
   // Follow the OS until the viewer picks a side. Someone who has never touched
   // the toggle should see the machine turn light at sunrise, not stay dark
@@ -301,15 +338,14 @@ export default function App() {
 
   const totalUnprotected = namespaces.reduce((sum, ns) => sum + ns.unprotected, 0)
   const empty = !syncing && !error && filtered && filtered.nodes.length === 0
+  // The one empty screen that is a finding rather than a void.
+  const noPolicies = meta?.counts.policies === 0
 
   // Held over the whole shell rather than over the canvas, so it continues the
   // boot screen instead of framing a half-drawn dashboard behind it.
   if (syncing && !graph && !error) {
     return (
-      <Splash
-        status="Syncing cluster state"
-        detail="Reading namespaces, workloads and policies. This takes a moment on first start."
-      />
+      <Splash progress={progress} />
     )
   }
 
@@ -318,7 +354,8 @@ export default function App() {
       <div className="flex h-full flex-col">
         <AppHeader
           meta={meta}
-          connected={connected}
+          status={status}
+          onReconnect={() => stream.current?.reconnect()}
           unprotected={totalUnprotected}
           onlyUnprotected={filters.onlyUnprotected}
           onToggleUnprotected={toggleOnlyUnprotected}
@@ -411,13 +448,107 @@ export default function App() {
                 </Overlay>
               )}
 
-              {empty && (
-                <Overlay icon={hidden > 0 ? ShieldOff : Telescope} title="Nothing to draw">
-                  {hidden > 0
-                    ? 'Every node is hidden by the current filters.'
-                    : selectedNs.length > 0
-                      ? 'No workloads in the selected namespaces.'
-                      : 'This cluster has no workloads Marsad can see.'}
+              {/* A stale graph looks exactly like a live one, so when the stream
+                  is not live the canvas says so rather than leaving the header
+                  badge to carry it alone. */}
+              {status.state !== 'live' && graph && (
+                <div className="glass rim absolute top-3.5 left-1/2 z-20 flex max-w-[46rem] -translate-x-1/2 items-start gap-2.5 rounded-xl border border-danger/40 px-3.5 py-2.5">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] text-text-body">
+                      Live updates stopped.{' '}
+                      {status.updatedAt ? (
+                        <>
+                          What you see is the snapshot taken at{' '}
+                          <span className="num">{status.updatedAt.toLocaleTimeString()}</span>, so it
+                          may no longer match the cluster.
+                        </>
+                      ) : (
+                        'Nothing has arrived over the stream yet, so this may already be out of date.'
+                      )}
+                    </p>
+                    <div className="mt-1.5 flex gap-1.5">
+                      <Button size="sm" variant="outline" onClick={() => stream.current?.reconnect()}>
+                        Reconnect
+                      </Button>
+                      {status.state === 'reconnecting' && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => stream.current?.keepSnapshot()}
+                        >
+                          Keep viewing snapshot
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* A cluster with no policies is not an empty screen. It is the
+                  strongest finding Marsad can report, and framing it as a void
+                  buries it. */}
+              {empty && noPolicies && (
+                <Overlay icon={ShieldOff} title="No network policies at all">
+                  <p>
+                    Every workload can reach every other workload, and anything outside the cluster.
+                    There is nothing for Marsad to draw — which is itself the finding.
+                  </p>
+                  <div className="mt-3.5 flex justify-center">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setFilters(defaultFilters())
+                        setIncludeDefault(true)
+                        setSelectedNs([])
+                        setLevel('workload')
+                      }}
+                    >
+                      Show all {meta?.counts.workloads ?? 0} workloads
+                    </Button>
+                  </div>
+                </Overlay>
+              )}
+
+              {empty && !noPolicies && (
+                <Overlay
+                  icon={hidden > 0 ? ShieldOff : Telescope}
+                  title={hidden > 0 ? 'No workload matches these filters' : 'Nothing to draw'}
+                >
+                  {hidden > 0 ? (
+                    <>
+                      <p>The cluster is fine — the filter is too narrow.</p>
+                      <div className="mt-3.5 flex justify-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setFilters(defaultFilters())
+                            setIncludeDefault(true)
+                          }}
+                        >
+                          Clear filters
+                        </Button>
+                        {selectedNs.length > 0 && (
+                          <Button size="sm" variant="ghost" onClick={() => setSelectedNs([])}>
+                            Clear namespace selection
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  ) : selectedNs.length > 0 ? (
+                    <>
+                      <p>No workloads in the selected namespaces.</p>
+                      <div className="mt-3.5 flex justify-center">
+                        <Button size="sm" variant="outline" onClick={() => setSelectedNs([])}>
+                          Clear namespace selection
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <p>This cluster has no workloads Marsad can see.</p>
+                  )}
                 </Overlay>
               )}
 

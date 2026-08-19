@@ -342,4 +342,7 @@ export async function mockApi(page: Page) {
   )
   await page.route('**/api/simulate', (r) => r.fulfill({ json: verdict }))
   await page.route('**/api/rules*', (r) => r.fulfill({ json: ruleDetails }))
+  await page.route('**/api/health', (r) =>
+    r.fulfill({ json: { ok: true, ready: true, time: new Date().toISOString(), progress: [] } }),
+  )
 }

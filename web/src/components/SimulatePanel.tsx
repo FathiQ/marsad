@@ -725,6 +725,29 @@ export function SimulatePanel({ open, onOpenChange, prefill }: Props) {
             </div>
           </form>
 
+          {/* The panel's own states, rather than a spinner on the button and a
+              blank area underneath it. A result area that is empty for the same
+              reason it is empty before the first run tells a reader nothing
+              about which of the two they are looking at. */}
+          {!error && !verdict && (
+            <div className="min-h-0 border-t border-line px-4 py-8">
+              {running ? (
+                <div className="space-y-2.5" aria-busy="true">
+                  <div className="h-16 animate-pulse rounded-xl bg-elevated" />
+                  <div className="grid gap-2.5 sm:grid-cols-2">
+                    <div className="h-28 animate-pulse rounded-xl bg-elevated" />
+                    <div className="h-28 animate-pulse rounded-xl bg-elevated" />
+                  </div>
+                </div>
+              ) : (
+                <p className="mx-auto max-w-[46ch] text-center text-[12px] leading-relaxed text-text-dim">
+                  Name both ends and a port. Marsad answers from declared policy alone — it never
+                  opens a connection to find out.
+                </p>
+              )}
+            </div>
+          )}
+
           {(error || verdict) && (
             <div className="min-h-0 overflow-y-auto border-t border-line px-4 py-4">
               {error && (
