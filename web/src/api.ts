@@ -213,6 +213,11 @@ export interface Decision {
   reason: SimReason
   via?: string[]
   explain: string
+  /** Decided, but by a rule whose reach configuration alone cannot pin down —
+   * a domain wildcard intersected with an address range. Deliberately not a
+   * fourth `result`: the question was answered, and it is the rule's extent
+   * that is approximate, not the answer. */
+  approximate?: boolean
   /** Each provider's own answer. With the layers combined by intersection, a
    * connection can be refused by one provider while another permits it, and
    * knowing which is what makes the denial actionable. */
@@ -228,6 +233,22 @@ export interface Verdict {
   egress: Decision
   ingress: Decision
   summary: string
+  /** Allowed, but leaning on a rule whose extent depends on DNS. Both this and
+   * `allowed` are true in that case. */
+  approximate?: boolean
+}
+
+/** One rule behind an edge: the excerpt, not the document it lives in. */
+export interface RuleDetail {
+  id: string
+  policy: ObjectRef
+  provider: string
+  path: string
+  /** YAML of the rule at `path` only. */
+  yaml?: string
+  /** Things true of this rule that are easy to read past, derived from the rule
+   * itself rather than matched against a list of known-bad strings. */
+  cautions?: string[]
 }
 
 /** Exactly one of these identifies an endpoint. */
@@ -298,6 +319,12 @@ export async function simulate(q: SimQuery): Promise<Verdict> {
     throw new Error(body?.error ?? `${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Verdict
+}
+
+/** Resolves the rules behind an edge, for the popover that explains it. */
+export function fetchRules(ids: string[]) {
+  if (ids.length === 0) return Promise.resolve<RuleDetail[]>([])
+  return get<RuleDetail[]>(`/api/rules?ids=${encodeURIComponent(ids.join(','))}`)
 }
 
 export function fetchWorkload(namespace: string, name: string, kind?: string) {

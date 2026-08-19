@@ -37,7 +37,10 @@ interface Props {
   /** Populated with the camera controls once the renderer exists. */
   controls?: MutableRefObject<GraphControls | null>
   onSelectNode: (node: GraphNode) => void
-  onSelectEdge: (edge: GraphEdge) => void
+  /** The click point comes with it: the popover is anchored to where the
+   * pointer actually landed, not to the edge's midpoint, which for a long
+   * curve can be most of a screen away from what was clicked. */
+  onSelectEdge: (edge: GraphEdge, at: { x: number; y: number }) => void
   onClearSelection: () => void
 }
 
@@ -182,7 +185,7 @@ export function GraphCanvas({
       const edge = over.hitTestEdge(x, y)
       if (edge) {
         const found = edgeIndex.current.get(edge)
-        if (found) onSelectEdge(found)
+        if (found) onSelectEdge(found, { x, y })
         return
       }
       onClearSelection()

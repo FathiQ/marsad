@@ -17,6 +17,7 @@ import {
 import { AppHeader } from './components/AppHeader'
 import { CanvasBar } from './components/CanvasBar'
 import { CommandPalette } from './components/CommandPalette'
+import { EdgePopover } from './components/EdgePopover'
 import { FilterRail } from './components/FilterRail'
 import { GraphCanvas, type GraphControls } from './components/GraphCanvas'
 import { Inspector } from './components/Inspector'
@@ -113,6 +114,8 @@ export default function App() {
   const [pinnedTheme, setPinnedTheme] = useState(stored !== null)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null)
+  /** Where the pointer landed, so the popover is anchored to the click. */
+  const [edgeAt, setEdgeAt] = useState<{ x: number; y: number } | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
@@ -208,6 +211,7 @@ export default function App() {
       if (e.key === 'Escape' && !typing) {
         setSelectedNode(null)
         setSelectedEdge(null)
+        setEdgeAt(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -380,13 +384,15 @@ export default function App() {
                     setSelectedNode(n)
                     setSelectedEdge(null)
                   }}
-                  onSelectEdge={(e) => {
+                  onSelectEdge={(e, at) => {
                     setSelectedEdge(e)
+                    setEdgeAt(at)
                     setSelectedNode(null)
                   }}
                   onClearSelection={() => {
                     setSelectedNode(null)
                     setSelectedEdge(null)
+                    setEdgeAt(null)
                   }}
                 />
               )}
@@ -417,14 +423,27 @@ export default function App() {
 
               <Inspector
                 node={selectedNode}
-                edge={selectedEdge}
-                nodesById={nodesById}
-                onClose={() => {
-                  setSelectedNode(null)
-                  setSelectedEdge(null)
-                }}
+                onClose={() => setSelectedNode(null)}
                 onSimulate={() => setSimulateOpen(true)}
               />
+
+              {selectedEdge && edgeAt && (
+                <EdgePopover
+                  edge={selectedEdge}
+                  at={edgeAt}
+                  source={nodesById.get(selectedEdge.source)}
+                  target={nodesById.get(selectedEdge.target)}
+                  onClose={() => {
+                    setSelectedEdge(null)
+                    setEdgeAt(null)
+                  }}
+                  onOpenNode={(n) => {
+                    setSelectedEdge(null)
+                    setEdgeAt(null)
+                    setSelectedNode(n)
+                  }}
+                />
+              )}
             </div>
 
             <CanvasBar

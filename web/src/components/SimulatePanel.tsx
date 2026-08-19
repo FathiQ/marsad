@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   fetchGraph,
+  fetchWorkload,
   simulate,
   type Decision,
+  type Effective,
   type GraphNode,
   type SimEndpoint,
   type SimResult,
@@ -267,7 +269,18 @@ const TONE: Record<SimResult, { tone: 'ok' | 'danger' | 'warn' | 'neutral'; text
  * identical in a graph and call for edits to different policies in different
  * namespaces.
  */
-function Half({ title, decision }: { title: string; decision: Decision }) {
+function Half({
+  title,
+  decision,
+  counterfactual,
+}: {
+  title: string
+  decision: Decision
+  /** What this half *would* accept, shown only when it is the half saying no.
+   * "Denied" tells you the connection fails; this tells you what the policy was
+   * written for, which is usually the difference between a fix and a guess. */
+  counterfactual?: string[]
+}) {
   const tone = TONE[decision.result] ?? TONE['not-applicable']
   const layers = Object.entries(decision.byLayer ?? {})
   // The server's sentence already names the rules it matched; repeating them
@@ -301,10 +314,32 @@ function Half({ title, decision }: { title: string; decision: Decision }) {
         </div>
       )}
 
+      {decision.approximate && (
+        <p className="mt-2 border-l-2 border-approx/50 pl-2.5 text-[11.5px] leading-relaxed text-approx-text">
+          Permitted, but the rule that permits it names a domain — which
+          addresses that covers is a runtime fact Marsad does not observe.
+        </p>
+      )}
+
+      {decision.result === 'denied' && counterfactual && counterfactual.length > 0 && (
+        <div className="mt-2.5 border-t border-dashed border-line pt-2.5">
+          <p className="text-[10.5px] tracking-[0.06em] text-text-dim uppercase">
+            What it does accept
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {counterfactual.map((line) => (
+              <li key={line} className="font-mono text-[11px] break-words text-text-body">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {via.length > 0 && (
         <div className="mt-2.5 space-y-1 border-t border-dashed border-line pt-2.5">
           {via.map((v) => (
-            <code key={v} className="block font-mono text-[10.5px] break-all text-faint">
+            <code key={v} className="block font-mono text-[10.5px] break-all text-text-dim">
               {v}
             </code>
           ))}
@@ -314,45 +349,124 @@ function Half({ title, decision }: { title: string; decision: Decision }) {
   )
 }
 
+/** The four states, with the current one lit. */
+const SCALE = ['Allowed', 'Denied', 'Approximate', 'Undecidable'] as const
+type ScaleState = (typeof SCALE)[number]
+
+function stateOf(verdict: Verdict): ScaleState {
+  if (verdict.undecidable) return 'Undecidable'
+  if (!verdict.allowed) return 'Denied'
+  return verdict.approximate ? 'Approximate' : 'Allowed'
+}
+
+const TONE_OF: Record<ScaleState, 'ok' | 'danger' | 'warn'> = {
+  Allowed: 'ok',
+  Denied: 'danger',
+  Approximate: 'warn',
+  Undecidable: 'warn',
+}
+
+/**
+ * What the verdict *means*, as opposed to what it is called.
+ *
+ * "Denied" is a label; "the source may leave, the destination will not accept"
+ * is the finding, and it is what decides which policy in which namespace
+ * somebody has to go and edit. The two halves look identical in a graph and
+ * call for entirely different work.
+ */
+function implication(verdict: Verdict): string {
+  const leaves = verdict.egress.result
+  const accepts = verdict.ingress.result
+
+  if (verdict.undecidable) {
+    return 'One half depends on what a domain name resolves to at runtime, which Marsad does not observe.'
+  }
+  if (verdict.allowed) {
+    const base = 'The source may leave. The destination will accept.'
+    return verdict.approximate
+      ? base + ' Both permit it, but one leans on a rule whose reach depends on DNS.'
+      : base
+  }
+
+  const half = (result: string, may: string, mayNot: string) =>
+    result === 'denied' ? mayNot : may
+
+  return [
+    half(leaves, 'The source may leave.', 'The source may not leave.'),
+    half(accepts, 'The destination will accept.', 'The destination will not accept.'),
+  ].join(' ')
+}
+
 function Headline({ verdict }: { verdict: Verdict }) {
-  const { tone, Icon, title } = verdict.undecidable
-    ? { tone: 'warn' as const, Icon: CircleHelp, title: 'Cannot be decided' }
-    : verdict.allowed
-      ? { tone: 'ok' as const, Icon: ShieldCheck, title: 'Allowed' }
-      : { tone: 'danger' as const, Icon: ShieldX, title: 'Denied' }
+  const state = stateOf(verdict)
+  const tone = TONE_OF[state]
+  const Icon =
+    state === 'Allowed' ? ShieldCheck : state === 'Denied' ? ShieldX : CircleHelp
 
   return (
-    <div
-      className={cn(
-        'flex items-start gap-3 rounded-xl border p-3.5',
-        tone === 'ok' && 'border-allowed/40 bg-allowed/10',
-        tone === 'danger' && 'border-danger/40 bg-danger/10',
-        tone === 'warn' && 'border-warn/40 bg-warn/10',
-      )}
-    >
-      <Icon
+    <div className="space-y-2.5">
+      <div
         className={cn(
-          'mt-0.5 size-5 shrink-0',
-          tone === 'ok' && 'text-allowed',
-          tone === 'danger' && 'text-danger',
-          tone === 'warn' && 'text-warn',
+          'flex items-start gap-3 rounded-xl border p-3.5',
+          tone === 'ok' && 'border-allowed/40 bg-allowed/10',
+          tone === 'danger' && 'border-danger/40 bg-danger/10',
+          tone === 'warn' && 'border-warn/40 bg-warn/10',
         )}
-      />
-      <div className="min-w-0">
-        <p
+      >
+        <Icon
           className={cn(
-            'text-[14px] font-semibold',
-            tone === 'ok' && 'text-allowed',
+            'mt-0.5 size-5 shrink-0',
+            tone === 'ok' && 'text-allowed-text',
             tone === 'danger' && 'text-danger',
-            tone === 'warn' && 'text-warn',
+            tone === 'warn' && 'text-approx-text',
           )}
-        >
-          {title}
-        </p>
-        <p className="mt-0.5 text-[12px] leading-relaxed break-words text-muted">
-          {verdict.summary.replace(/^(ALLOWED|DENIED|UNDECIDABLE): /, '')}
-        </p>
+        />
+        <div className="min-w-0 flex-1">
+          <p
+            className={cn(
+              'text-[14px] font-semibold',
+              tone === 'ok' && 'text-allowed-text',
+              tone === 'danger' && 'text-danger',
+              tone === 'warn' && 'text-approx-text',
+            )}
+          >
+            {state === 'Undecidable' ? 'Cannot be decided' : state}
+          </p>
+          <p className="mt-0.5 text-[12.5px] leading-relaxed break-words text-text-body">
+            {implication(verdict)}
+          </p>
+          <p className="mt-1 font-mono text-[11px] leading-relaxed break-words text-text-dim">
+            {verdict.summary.replace(/^(ALLOWED|DENIED|UNDECIDABLE): /, '')}
+          </p>
+        </div>
       </div>
+
+      {/* The scale, so the answer is read against the alternatives it was
+          chosen from rather than in isolation. Undecidable in particular means
+          nothing until you can see it is not the same kind of thing as Denied. */}
+      <ol
+        aria-label="Verdict scale"
+        className="flex items-center gap-1 rounded-lg border border-line bg-bg p-1"
+      >
+        {SCALE.map((s) => {
+          const current = s === state
+          return (
+            <li
+              key={s}
+              aria-current={current ? 'true' : undefined}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1 text-center text-[11px] transition-colors',
+                !current && 'text-text-dim',
+                current && TONE_OF[s] === 'ok' && 'bg-allowed/15 font-semibold text-allowed-text',
+                current && TONE_OF[s] === 'danger' && 'bg-danger/15 font-semibold text-danger',
+                current && TONE_OF[s] === 'warn' && 'bg-approx/15 font-semibold text-approx-text',
+              )}
+            >
+              {s}
+            </li>
+          )
+        })}
+      </ol>
     </div>
   )
 }
@@ -413,6 +527,72 @@ export function SimulatePanel({ open, onOpenChange, prefill }: Props) {
 
   const fromEP = resolveEndpoint(from)
   const toEP = resolveEndpoint(to)
+
+  /*
+   * What the refusing half *does* accept.
+   *
+   * A denial tells you the connection fails. It does not tell you what the
+   * policy was written for, and without that the next step is a guess — the
+   * commonest guess being that the rule is missing entirely, when in fact it
+   * exists and names a different peer or a different port. Read from the same
+   * evaluation the graph draws, so it cannot disagree with the panel above it.
+   */
+  const [accepts, setAccepts] = useState<{ egress: string[]; ingress: string[] }>({
+    egress: [],
+    ingress: [],
+  })
+
+  useEffect(() => {
+    if (!verdict) {
+      setAccepts({ egress: [], ingress: [] })
+      return
+    }
+
+    const lines = (eff: Effective | undefined, preposition: string) =>
+      (eff?.allows ?? []).slice(0, 4).map((a) => {
+        const ports = a.ports?.length
+          ? a.ports
+              .map((pr) =>
+                pr.allPorts ? `*/${pr.protocol}` : `${pr.from ?? '?'}/${pr.protocol}`,
+              )
+              .join(', ')
+          : 'any port'
+        return `${ports} ${preposition} ${a.peer.display}`
+      })
+
+    let cancelled = false
+    const load = async () => {
+      const next = { egress: [] as string[], ingress: [] as string[] }
+
+      // Only the half that said no, and only when it is a workload — a CIDR or
+      // a domain has no policy of its own to report.
+      if (verdict.egress.result === 'denied' && from.workload) {
+        const d = await fetchWorkload(
+          from.workload.namespace,
+          from.workload.name,
+          from.workload.kind,
+        ).catch(() => null)
+        next.egress = lines(d?.egress, 'to')
+      }
+      if (verdict.ingress.result === 'denied' && to.workload) {
+        const d = await fetchWorkload(
+          to.workload.namespace,
+          to.workload.name,
+          to.workload.kind,
+        ).catch(() => null)
+        next.ingress = lines(d?.ingress, 'from')
+      }
+      if (!cancelled) setAccepts(next)
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [verdict, from.workload, to.workload])
+
+  const egressCounterfactual = accepts.egress
+  const ingressCounterfactual = accepts.ingress
+
   const portNum = Number(port)
   const portOk = Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535
   const ready = Boolean(fromEP && toEP && portOk)
@@ -556,8 +736,22 @@ export function SimulatePanel({ open, onOpenChange, prefill }: Props) {
               {verdict && (
                 <div className="space-y-2.5">
                   <Headline verdict={verdict} />
-                  <Half title="Egress · may the source leave" decision={verdict.egress} />
-                  <Half title="Ingress · will the destination accept" decision={verdict.ingress} />
+                  {/* Side by side, so "both must permit" is the shape of the
+                      answer and not a sentence underneath it. Stacked, the
+                      second half reads as a footnote to the first, which is
+                      exactly the mistake the panel exists to prevent. */}
+                  <div className="grid gap-2.5 sm:grid-cols-2">
+                    <Half
+                      title="Egress · may the source leave"
+                      decision={verdict.egress}
+                      counterfactual={egressCounterfactual}
+                    />
+                    <Half
+                      title="Ingress · will the destination accept"
+                      decision={verdict.ingress}
+                      counterfactual={ingressCounterfactual}
+                    />
+                  </div>
                   <p className="pt-0.5 text-[11px] leading-relaxed text-faint">
                     Both halves must permit a connection for it to work. Checking only one is the
                     usual way reading policy by hand goes wrong, so both are always shown —

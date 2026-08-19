@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +178,159 @@ func TestFrontendCacheHeaders(t *testing.T) {
 		if got := server.CacheControlForTest(tc.path); got != tc.want {
 			t.Errorf("cacheControl(%q) = %q, want %q", tc.path, got, tc.want)
 		}
+	}
+}
+
+// worldServer carries a policy whose ipBlock is 0.0.0.0/0, which is the case
+// the caution line exists for.
+func worldServer(t *testing.T) *server.Server {
+	t.Helper()
+
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "open-ingress"},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: *sel("app", "db"),
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{
+					{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}},
+				},
+				Ports: []networkingv1.NetworkPolicyPort{{Port: port(5432)}},
+			}},
+		},
+	}
+	policy, err := k8s.NormalizePolicy(np)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := npeval.NewBuilder().
+		AddNamespace(npeval.Namespace{Name: "prod"}).
+		AddWorkload(deploy("prod", "db", "app", "db")).
+		AddPolicy(policy).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &cluster.State{Snapshot: snap, Revision: 1, BuiltAt: time.Now()}
+	return server.New(server.Options{Source: &fixedSource{state: state}})
+}
+
+type ruleDetailView struct {
+	ID       string                `json:"id"`
+	Policy   struct{ Name string } `json:"policy"`
+	Path     string                `json:"path"`
+	YAML     string                `json:"yaml"`
+	Cautions []string              `json:"cautions"`
+}
+
+// TestRulesReturnsTheExcerptNotTheDocument is the whole point of the endpoint.
+// A policy is often a hundred lines governing several directions, and an edge
+// comes from exactly one entry of one list.
+func TestRulesReturnsTheExcerptNotTheDocument(t *testing.T) {
+	id := "networking.k8s.io/NetworkPolicy/prod/db-ingress#ingress[0]"
+	res, body := do(t, testServer(t), http.MethodGet,
+		"/api/rules?ids="+url.QueryEscape(id), "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", res.StatusCode, body)
+	}
+
+	var out []ruleDetailView
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v — %s", err, body)
+	}
+	if len(out) != 1 {
+		t.Fatalf("got %d rules, want 1: %s", len(out), body)
+	}
+
+	got := out[0]
+	if got.Policy.Name != "db-ingress" {
+		t.Errorf("policy = %q, want db-ingress", got.Policy.Name)
+	}
+	if got.Path != "spec.ingress[0]" {
+		t.Errorf("path = %q, want spec.ingress[0]", got.Path)
+	}
+	// The rule, and only the rule. Not podSelector, which the rule legitimately
+	// contains inside its own `from` list — the document-level keys are the ones
+	// that prove this is an excerpt.
+	for _, unwanted := range []string{"apiVersion", "kind:", "metadata", "policyTypes"} {
+		if strings.Contains(got.YAML, unwanted) {
+			t.Errorf("the excerpt contains %q, so it is the whole document:\n%s", unwanted, got.YAML)
+		}
+	}
+	if !strings.Contains(got.YAML, "from:") || !strings.Contains(got.YAML, "5432") {
+		t.Errorf("the excerpt should be the rule itself:\n%s", got.YAML)
+	}
+}
+
+// TestRulesDerivesTheWorldCaution: the sentence comes from the rule, not from a
+// list of strings to look out for.
+func TestRulesDerivesTheWorldCaution(t *testing.T) {
+	id := "networking.k8s.io/NetworkPolicy/prod/open-ingress#ingress[0]"
+	res, body := do(t, worldServer(t), http.MethodGet,
+		"/api/rules?ids="+url.QueryEscape(id), "")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", res.StatusCode, body)
+	}
+
+	var out []ruleDetailView
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("got %d rules, want 1", len(out))
+	}
+	if len(out[0].Cautions) == 0 {
+		t.Fatal("a rule admitting 0.0.0.0/0 should carry a caution")
+	}
+	if !strings.Contains(out[0].Cautions[0], "every address") {
+		t.Errorf("caution = %q, want it to say the range covers every address", out[0].Cautions[0])
+	}
+}
+
+// TestRulesSaysNothingAboutAnOrdinaryRule keeps the caution meaningful: one
+// that fires on every rule is decoration.
+func TestRulesSaysNothingAboutAnOrdinaryRule(t *testing.T) {
+	id := "networking.k8s.io/NetworkPolicy/prod/db-ingress#ingress[0]"
+	_, body := do(t, testServer(t), http.MethodGet, "/api/rules?ids="+url.QueryEscape(id), "")
+
+	var out []ruleDetailView
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) == 1 && len(out[0].Cautions) != 0 {
+		t.Errorf("an ordinary pod-to-pod rule needs no caution, got %v", out[0].Cautions)
+	}
+}
+
+func TestRulesRejectsAnEmptyOrOversizedRequest(t *testing.T) {
+	s := testServer(t)
+
+	if res, _ := do(t, s, http.MethodGet, "/api/rules", ""); res.StatusCode != http.StatusBadRequest {
+		t.Errorf("no ids: status %d, want 400", res.StatusCode)
+	}
+
+	many := make([]string, 65)
+	for i := range many {
+		many[i] = "x"
+	}
+	res, _ := do(t, s, http.MethodGet, "/api/rules?ids="+strings.Join(many, ","), "")
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("65 ids: status %d, want 400", res.StatusCode)
+	}
+}
+
+// TestRulesSkipsUnknownIdentifiers: a stale edge from a graph the client is
+// still holding must not fail the whole request.
+func TestRulesSkipsUnknownIdentifiers(t *testing.T) {
+	_, body := do(t, testServer(t), http.MethodGet,
+		"/api/rules?ids=nope%23ingress%5B0%5D", "")
+
+	var out []ruleDetailView
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 0 {
+		t.Errorf("got %d rules for an unknown id, want 0", len(out))
 	}
 }

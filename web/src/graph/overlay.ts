@@ -269,6 +269,7 @@ export class OverlayRenderer {
   private cards: Card[] = []
   private cardsById = new Map<string, Card>()
   private edges: Edge[] = []
+  private edgesById = new Map<string, Edge>()
   private rects: Rect[] = []
   private curves: Curve[] = []
   private palette: NamespacePalette = new Map()
@@ -441,6 +442,8 @@ export class OverlayRenderer {
         : -1
       return { id: e.id, source: e.source, target: e.target, kind: e.kind, accessIndex }
     })
+
+    this.edgesById = new Map(this.edges.map((e) => [e.id, e]))
   }
 
   /** The largest card, so the camera can be fitted to what is actually drawn
@@ -851,8 +854,20 @@ export class OverlayRenderer {
       const to = centres.get(edge.target)
       if (!sourceCard || !targetCard || !from || !to) continue
 
-      const dimmed =
-        this.hovered !== null && edge.source !== this.hovered && edge.target !== this.hovered
+      /*
+       * Dimmed by hover, and by selection.
+       *
+       * Selecting an edge used to change nothing about the picture: the panel
+       * opened, and the line it was describing stayed one of forty identical
+       * lines. Hover already had this treatment, which made the omission odd
+       * rather than deliberate — the moment you took your hand off the mouse to
+       * read the answer, the subject of the answer disappeared back into the
+       * hairball.
+       */
+      const selectedEdge = this.selected !== null && this.edgesById.has(this.selected)
+      const dimmed = selectedEdge
+        ? edge.id !== this.selected
+        : this.hovered !== null && edge.source !== this.hovered && edge.target !== this.hovered
 
       const fan = fanIndex.get(edge.id) ?? { index: 0, total: 1 }
       const sourceH = (zoom < CHIP_SCALE ? HEADER_H : sourceCard.h) * scale

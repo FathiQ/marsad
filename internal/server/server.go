@@ -65,6 +65,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/namespaces", s.handleNamespaces)
 	s.mux.HandleFunc("GET /api/graph", s.handleGraph)
 	s.mux.HandleFunc("GET /api/workloads/{namespace}/{name}", s.handleWorkload)
+	s.mux.HandleFunc("GET /api/rules", s.handleRules)
 	s.mux.HandleFunc("POST /api/simulate", s.handleSimulate)
 	s.mux.HandleFunc("GET /api/stream", s.handleStream)
 

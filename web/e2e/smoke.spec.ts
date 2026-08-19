@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { graph, mockApi } from './fixtures'
+import {
+  approximateVerdict,
+  graph,
+  mockApi,
+  undecidableVerdict,
+  worldRuleDetails,
+} from './fixtures'
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page)
@@ -394,7 +400,11 @@ test('simulate reports both halves, not just the answer', async ({ page }) => {
   await dialog.locator('#sim-port').fill('8080')
   await dialog.getByRole('button', { name: 'Check' }).click()
 
-  await expect(dialog.getByText('Denied', { exact: true })).toBeVisible()
+  // 'Denied' appears twice on purpose now — as the verdict and as the lit entry
+  // on the four-state scale — so assert the one that carries the meaning.
+  await expect(
+    dialog.getByRole('list', { name: 'Verdict scale' }).locator('[aria-current="true"]'),
+  ).toHaveText('Denied')
 
   // Both directions are reported even though egress alone settles it: the fix
   // for each lives in a different policy, in a different namespace. The headings
@@ -561,6 +571,12 @@ test('a namespace no policy selects lays out as a grid, not a column', async ({ 
 })
 
 test('a pan survives a cluster change, but not a change of view', async ({ page }) => {
+  // Given room: this drags the mouse and then waits for the overlay to stop
+  // repainting, and under parallel load the settle can outlast the default
+  // timeout. It measures real timing rather than asserting on a threshold that
+  // could simply be loosened, so it gets more time instead of weaker checks.
+  test.slow()
+
   // The stream sends a fresh graph on any cluster change, and the camera used
   // to refit on every one of them. On a busy cluster that discarded a pan or a
   // zoom seconds after it was made, so the view appeared to move on its own.
@@ -885,4 +901,283 @@ test('the header names the build that is answering', async ({ page }) => {
   // rather than the bundle: after an upgrade the page may still be the cached
   // one, and a number baked into it would report the build it was built from.
   await expect(page.getByRole('banner').getByText('v1.2.3-test')).toBeVisible()
+})
+
+/* ------------------------------------------------- simulate and edge rules */
+
+async function runSimulation(page: Page) {
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
+  await expect(dialog).toBeVisible()
+  await dialog.locator('#sim-from').fill('edge/web')
+  await dialog.locator('#sim-to').fill('prod/api')
+  await dialog.locator('#sim-port').fill('8080')
+  await dialog.getByRole('button', { name: 'Check' }).click()
+  return dialog
+}
+
+test('the two halves sit side by side, not stacked', async ({ page }) => {
+  // "Both must permit" is the point of the panel, and stacked the second half
+  // reads as a footnote to the first — which is the exact mistake this exists
+  // to prevent.
+  const dialog = await runSimulation(page)
+
+  const egress = dialog.getByText('Egress · may the source leave')
+  const ingress = dialog.getByText('Ingress · will the destination accept')
+  await expect(egress).toBeVisible()
+  await expect(ingress).toBeVisible()
+
+  const a = await egress.boundingBox()
+  const b = await ingress.boundingBox()
+  expect(a).not.toBeNull()
+  expect(b).not.toBeNull()
+  // Same row: their vertical centres line up, and one is to the right.
+  expect(Math.abs(a!.y - b!.y)).toBeLessThan(24)
+  expect(b!.x).toBeGreaterThan(a!.x)
+})
+
+test('the verdict states the implication and shows the scale', async ({ page }) => {
+  // "Denied" is a label. Which half refused is what decides whose policy you go
+  // and edit, and the two look identical in a graph.
+  const dialog = await runSimulation(page)
+
+  await expect(dialog.getByText('The source may not leave.')).toBeVisible()
+  await expect(dialog.getByText('The destination will accept.')).toBeVisible()
+
+  const scale = dialog.getByRole('list', { name: 'Verdict scale' })
+  await expect(scale).toBeVisible()
+  for (const state of ['Allowed', 'Denied', 'Approximate', 'Undecidable']) {
+    await expect(scale.getByText(state, { exact: true })).toBeVisible()
+  }
+  await expect(scale.locator('[aria-current="true"]')).toHaveText('Denied')
+})
+
+test('the refusing half says what it does accept', async ({ page }) => {
+  // A denial says the connection fails. It does not say what the policy was
+  // written for, and without that the next step is a guess.
+  //
+  // Picked from the suggestion list rather than typed: what a workload accepts
+  // can only be read from a workload, and free text is a domain until the
+  // cluster says otherwise. That is the behaviour, not a detail of the test.
+  await page.getByRole('button', { name: /Simulate/ }).click()
+  const dialog = page.getByRole('dialog', { name: /Would this connection be allowed/ })
+  await expect(dialog).toBeVisible()
+
+  await dialog.locator('#sim-from').fill('web')
+  await dialog.locator('#sim-from').press('ArrowDown')
+  await dialog.locator('#sim-from').press('Enter')
+  await dialog.locator('#sim-to').fill('api')
+  await dialog.locator('#sim-to').press('ArrowDown')
+  await dialog.locator('#sim-to').press('Enter')
+  await dialog.locator('#sim-port').fill('8080')
+  await dialog.getByRole('button', { name: 'Check' }).click()
+
+  // Egress is the half that refused, so the counterfactual is what the *source*
+  // is permitted to reach — not what the destination accepts.
+  await expect(dialog.getByText('What it does accept')).toBeVisible()
+  await expect(dialog.getByText(/443\/TCP to \*\.s3\.us-east-1\.amazonaws\.com/)).toBeVisible()
+})
+
+test('an undecidable verdict has a path to the screen', async ({ page }) => {
+  // It is in the model, it is produced by a domain-versus-address query, and
+  // until now nothing in the UI could reach it.
+  await page.route('**/api/simulate', (r) => r.fulfill({ json: undecidableVerdict }))
+  const dialog = await runSimulation(page)
+
+  await expect(dialog.getByText('Cannot be decided')).toBeVisible()
+  await expect(
+    dialog.getByText(/depends on what a domain name resolves to at runtime/),
+  ).toBeVisible()
+  await expect(
+    dialog.getByRole('list', { name: 'Verdict scale' }).locator('[aria-current="true"]'),
+  ).toHaveText('Undecidable')
+})
+
+test('an approximate verdict is allowed, and says what is approximate', async ({ page }) => {
+  // Allowed and Approximate are both true: the question was answered, and it is
+  // the rule's reach that configuration cannot pin down.
+  await page.route('**/api/simulate', (r) => r.fulfill({ json: approximateVerdict }))
+  const dialog = await runSimulation(page)
+
+  await expect(
+    dialog.getByRole('list', { name: 'Verdict scale' }).locator('[aria-current="true"]'),
+  ).toHaveText('Approximate')
+  await expect(dialog.getByText(/one leans on a rule whose reach depends on DNS/)).toBeVisible()
+})
+
+/** Where an edge of this colour is painted, as canvas-relative fractions. */
+async function edgePixels(page: Page, rgb: [number, number, number]) {
+  return await page.evaluate(
+    ({ rgb }) => {
+      const c = document.querySelector<HTMLCanvasElement>('canvas.pointer-events-none')
+      if (!c) return []
+      const copy = document.createElement('canvas')
+      copy.width = c.width
+      copy.height = c.height
+      const ctx = copy.getContext('2d')
+      if (!ctx) return []
+      ctx.drawImage(c, 0, 0)
+      const d = ctx.getImageData(0, 0, copy.width, copy.height).data
+
+      const hits: { x: number; y: number }[] = []
+      for (let y = 0; y < copy.height; y += 2) {
+        for (let x = 0; x < copy.width; x += 2) {
+          const i = (y * copy.width + x) * 4
+          if (d[i + 3]! < 150) continue
+          if (
+            Math.abs(d[i]! - rgb[0]) < 30 &&
+            Math.abs(d[i + 1]! - rgb[1]) < 30 &&
+            Math.abs(d[i + 2]! - rgb[2]) < 30
+          ) {
+            hits.push({ x: x / copy.width, y: y / copy.height })
+          }
+        }
+      }
+
+      // Spread across the painted span rather than clustered anywhere in
+      // particular. The access-point markers on a card are drawn in the same
+      // colour as the edge that produced them, so not every matching pixel is
+      // edge — and where the edge falls depends on a layout no test should
+      // assume.
+      hits.sort((a, b) => a.x - b.x || a.y - b.y)
+      const wanted = 24
+      const step = Math.max(1, Math.floor(hits.length / wanted))
+      const spread: { x: number; y: number }[] = []
+      for (let i = 0; i < hits.length && spread.length < wanted; i += step) {
+        spread.push(hits[i]!)
+      }
+      return spread
+    },
+    { rgb },
+  )
+}
+
+/**
+ * Clicks the edge, found by the colour it is painted in.
+ *
+ * The graph is a canvas, so there is no element to target and no coordinate a
+ * test should hardcode — dagre decides the layout, and an edge terminates on a
+ * port row rather than a card's centre.
+ *
+ * Re-probed before every attempt, because the camera animates into its fit over
+ * a few hundred milliseconds after the overlay stops changing: coordinates read
+ * once and clicked later land where the edge *was*. That is what made the first
+ * version of this pass and fail on alternate runs with nothing changed between
+ * them.
+ */
+async function clickAnEdge(page: Page, rgb: [number, number, number] = [0x38, 0xd0, 0x80]) {
+  const box = await page.locator('main canvas').first().boundingBox()
+  expect(box).not.toBeNull()
+
+  const popover = page.getByRole('dialog', { name: 'Connection' })
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const points = await edgePixels(page, rgb)
+    expect(points.length, 'the edge was never painted').toBeGreaterThan(0)
+
+    const point = points[attempt % points.length]!
+    await page.mouse.click(box!.x + box!.width * point.x, box!.y + box!.height * point.y)
+    if (await popover.isVisible()) return
+  }
+  throw new Error('clicked every candidate on the edge and no popover opened')
+}
+
+const twoNodeGraph = (via: string[]) => ({
+  level: 'workload',
+  nodes: [
+    {
+      id: 'wl:prod/Deployment/web',
+      kind: 'workload',
+      label: 'web',
+      namespace: 'prod',
+      workloadKind: 'Deployment',
+      replicas: 1,
+      isolation: { ingress: true, egress: true },
+    },
+    {
+      id: 'wl:prod/Deployment/db',
+      kind: 'workload',
+      label: 'db',
+      namespace: 'prod',
+      workloadKind: 'Deployment',
+      replicas: 1,
+      isolation: { ingress: true, egress: true },
+    },
+  ],
+  edges: [
+    {
+      id: 'e1',
+      source: 'wl:prod/Deployment/web',
+      target: 'wl:prod/Deployment/db',
+      kind: 'allowed',
+      ports: ['5432/TCP'],
+      via,
+    },
+  ],
+})
+
+test('clicking an edge shows the rule behind it, where the edge is', async ({ page }) => {
+  // The canvas bar has promised this since the beginning, and clicking an edge
+  // opened the same side panel workloads use — several hundred pixels from the
+  // question, after the graph had shifted to make room.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: twoNodeGraph(['networking.k8s.io/NetworkPolicy/prod/api-ingress#ingress[0]']),
+      },
+    }),
+  )
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await settled(page)
+  await clickAnEdge(page)
+
+  const popover = page.getByRole('dialog', { name: 'Connection' })
+  await expect(popover.getByText('allowed by a rule')).toBeVisible()
+  await expect(popover.getByText('5432/TCP')).toBeVisible()
+  await expect(popover.getByText('api-ingress')).toBeVisible()
+
+  // The excerpt, not the document: no apiVersion, no metadata.
+  const yaml = await popover.locator('pre').innerText()
+  expect(yaml).toContain('podSelector')
+  expect(yaml).not.toContain('apiVersion')
+
+  await expect(popover.getByRole('button', { name: /Copy YAML/ })).toBeVisible()
+})
+
+/*
+ * Not tested here: selecting an edge dims the others.
+ *
+ * It is implemented — drawEdges takes its dim state from the selection as well
+ * as from hover — but there is no honest assertion available from outside the
+ * canvas. The access-point row a card draws for an incoming edge uses that
+ * edge's own colour, and cards are not dimmed by selection, so counting pixels
+ * of a colour measures the card as much as the line. Every threshold that made
+ * the test pass was one that would also have passed with the dimming removed.
+ *
+ * A real assertion needs a way to address an edge that is not a pixel probe.
+ * The keyboard path that gives edges a selectable identity is the one that will
+ * make this testable, and the same gap is why an edge cannot be reached without
+ * a mouse today.
+ */
+
+test('an edge admitting the whole internet says so', async ({ page }) => {
+  // Derived from the rule, so it fires however the policy was written.
+  await page.route('**/api/rules*', (r) => r.fulfill({ json: worldRuleDetails }))
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: twoNodeGraph(['networking.k8s.io/NetworkPolicy/prod/open-ingress#ingress[0]']),
+      },
+    }),
+  )
+  await page.setViewportSize({ width: 1400, height: 900 })
+  await page.goto('/')
+  await settled(page)
+  await clickAnEdge(page)
+
+  await expect(
+    page.getByRole('dialog', { name: 'Connection' }).getByText(/accepts from every address/),
+  ).toBeVisible()
 })

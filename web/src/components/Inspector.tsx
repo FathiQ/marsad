@@ -14,7 +14,6 @@ import {
   fetchWorkload,
   type Allow,
   type Effective,
-  type GraphEdge,
   type GraphNode,
   type Miss,
   type PortRange,
@@ -29,8 +28,6 @@ import { Separator } from './ui/separator'
 
 interface Props {
   node: GraphNode | null
-  edge: GraphEdge | null
-  nodesById: Map<string, GraphNode>
   onClose: () => void
   /** Opens the simulate panel already framed by whatever is selected. */
   onSimulate: () => void
@@ -340,64 +337,6 @@ function ClosestMisses({ misses, labels }: { misses: Miss[]; labels?: Record<str
   )
 }
 
-function EdgeBody({ edge, nodesById }: { edge: GraphEdge; nodesById: Map<string, GraphNode> }) {
-  const source = nodesById.get(edge.source)
-  const target = nodesById.get(edge.target)
-
-  return (
-    <div className="space-y-6">
-      <Section title="Traffic">
-        {/* From and to, stated as a direction rather than as two rows: which way
-            the traffic goes is half the meaning of a policy edge. */}
-        <div className="flex items-center gap-2.5 rounded-lg border border-line bg-bg p-3">
-          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-fg">
-            {source?.label ?? edge.source}
-          </span>
-          <ArrowRight className="size-4 shrink-0 text-accent" />
-          <span className="min-w-0 flex-1 truncate text-right text-[12.5px] font-medium text-fg">
-            {target?.label ?? edge.target}
-          </span>
-        </div>
-
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[12.5px]">
-          <dt className="text-text-dim">Ports</dt>
-          <dd className="font-mono text-[11.5px] text-text-body">
-            {edge.ports?.length ? edge.ports.join(', ') : 'all ports'}
-          </dd>
-          <dt className="text-text-dim">Kind</dt>
-          <dd>
-            {edge.kind === 'allowed' && <Badge tone="ok">explicitly allowed</Badge>}
-            {edge.kind === 'default' && <Badge>allowed by default</Badge>}
-            {edge.kind === 'approximate' && <Badge tone="warn">approximate</Badge>}
-          </dd>
-        </dl>
-
-        {edge.note && (
-          <p className="border-l-2 border-approx/50 pl-2.5 text-[11.5px] leading-relaxed text-approx-text">
-            {edge.note}
-          </p>
-        )}
-      </Section>
-
-      <Section title="Produced by">
-        {!edge.via?.length ? (
-          <p className="text-[12.5px] text-muted">
-            Nothing produced this edge — it exists because no policy isolates the workload.
-          </p>
-        ) : (
-          <div className="space-y-1 rounded-lg border border-line bg-bg p-3">
-            {edge.via?.map((v) => (
-              <code key={v} className="block font-mono text-[10.5px] break-all text-muted">
-                {v}
-              </code>
-            ))}
-          </div>
-        )}
-      </Section>
-    </div>
-  )
-}
-
 function WorkloadBody({
   detail,
   openPolicy,
@@ -530,7 +469,7 @@ function WorkloadBody({
   )
 }
 
-export function Inspector({ node, edge, nodesById, onClose, onSimulate }: Props) {
+export function Inspector({ node, onClose, onSimulate }: Props) {
   const [detail, setDetail] = useState<WorkloadDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -564,11 +503,11 @@ export function Inspector({ node, edge, nodesById, onClose, onSimulate }: Props)
     })
   }
 
-  const open = Boolean(node || edge)
-  const title = edge ? 'Connection' : (node?.label ?? '')
-  const subtitle = edge
-    ? 'the rules behind it'
-    : [node?.namespace, node?.workloadKind ?? node?.kind].filter(Boolean).join(' · ')
+  const open = Boolean(node)
+  const title = node?.label ?? ''
+  const subtitle = [node?.namespace, node?.workloadKind ?? node?.kind]
+    .filter(Boolean)
+    .join(' · ')
   const isWorkload = node?.kind === 'workload'
 
   return (
@@ -598,9 +537,7 @@ export function Inspector({ node, edge, nodesById, onClose, onSimulate }: Props)
 
           <ScrollArea className="flex-1" viewportRef={scroller}>
             <div className="p-4 pb-10">
-              {edge && <EdgeBody edge={edge} nodesById={nodesById} />}
-
-              {node && !edge && (
+              {node && (
                 <>
                   {loading && (
                     <div className="space-y-3" aria-busy="true">

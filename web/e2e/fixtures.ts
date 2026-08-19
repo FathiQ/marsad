@@ -259,6 +259,76 @@ export const verdict = {
   summary: 'DENIED: apps/Deployment/edge/web → apps/Deployment/prod/api on 8080/TCP',
 }
 
+/**
+ * The rules behind the fixture's edges: the excerpt, not the document.
+ *
+ * One of them admits 0.0.0.0/0, which is what the derived caution line exists
+ * for — the sentence comes from the rule, so a policy that reaches everything
+ * says so however it happened to be written.
+ */
+export const ruleDetails = [
+  {
+    id: 'networking.k8s.io/NetworkPolicy/prod/api-ingress#ingress[0]',
+    policy: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'api-ingress' },
+    provider: 'k8s',
+    path: 'spec.ingress[0]',
+    yaml: 'from:\n  - podSelector:\n      matchLabels:\n        app: web\nports:\n  - port: 8080\n',
+  },
+]
+
+export const worldRuleDetails = [
+  {
+    id: 'networking.k8s.io/NetworkPolicy/prod/open-ingress#ingress[0]',
+    policy: { group: 'networking.k8s.io', kind: 'NetworkPolicy', namespace: 'prod', name: 'open-ingress' },
+    provider: 'k8s',
+    path: 'spec.ingress[0]',
+    yaml: 'from:\n  - ipBlock:\n      cidr: 0.0.0.0/0\nports:\n  - port: 5432\n',
+    cautions: ['0.0.0.0/0 accepts from every address, in the cluster and outside it.'],
+  },
+]
+
+/** Allowed, but leaning on a rule whose reach depends on DNS — the fourth state
+ * on the verdict scale, and the one that had no path to the screen. */
+export const approximateVerdict = {
+  allowed: true,
+  undecidable: false,
+  approximate: true,
+  egress: {
+    result: 'allowed',
+    reason: 'matched-rule',
+    approximate: true,
+    via: ['networking.k8s.aws/ApplicationNetworkPolicy/prod/aws#egress[0]'],
+    explain:
+      'apps/Deployment/prod/api egress to bucket.s3.us-east-1.amazonaws.com on 443/TCP allowed by networking.k8s.aws/ApplicationNetworkPolicy/prod/aws#egress[0]; that rule names a domain, and which addresses it covers depends on DNS resolution, which Marsad does not observe',
+  },
+  ingress: {
+    result: 'not-applicable',
+    reason: '',
+    explain: 'bucket.s3.us-east-1.amazonaws.com is not a workload, so no ingress policy applies to it',
+  },
+  summary: 'ALLOWED: apps/Deployment/prod/api → bucket.s3.us-east-1.amazonaws.com on 443/TCP',
+}
+
+/** Neither half can be settled from configuration: a domain rule on one side,
+ * an address on the other. It is in the model and had no UI path. */
+export const undecidableVerdict = {
+  allowed: false,
+  undecidable: true,
+  egress: {
+    result: 'undecidable',
+    reason: 'domain-resolution',
+    explain:
+      'policy allows the domain *.s3.us-east-1.amazonaws.com on 443/TCP; whether 52.216.0.1/32 is one of its addresses depends on DNS resolution, which Marsad does not observe',
+    byLayer: { 'aws-anp': 'undecidable' },
+  },
+  ingress: {
+    result: 'not-applicable',
+    reason: '',
+    explain: '52.216.0.1/32 is not a workload, so no ingress policy applies to it',
+  },
+  summary: 'UNDECIDABLE: apps/Deployment/prod/api → 52.216.0.1/32 on 443/TCP',
+}
+
 /** Serves the fixture cluster and lets the websocket fail, which is a state the
  * UI must survive: it falls back to the HTTP fetch and reports "offline". */
 export async function mockApi(page: Page) {
@@ -271,4 +341,5 @@ export async function mockApi(page: Page) {
     r.fulfill({ json: r.request().url().includes('/legacy') ? unprotectedDetail : workloadDetail }),
   )
   await page.route('**/api/simulate', (r) => r.fulfill({ json: verdict }))
+  await page.route('**/api/rules*', (r) => r.fulfill({ json: ruleDetails }))
 }
