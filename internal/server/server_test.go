@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/FathiQ/marsad/internal/server"
@@ -332,5 +335,91 @@ func TestRulesSkipsUnknownIdentifiers(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Errorf("got %d rules for an unknown id, want 0", len(out))
+	}
+}
+
+// TestHealthCarriesTheFaultVerbatim: the API server's own sentence is the only
+// thing that makes a permission failure fixable, and every layer that
+// paraphrases it can turn one problem into a different one.
+func TestHealthCarriesTheFaultVerbatim(t *testing.T) {
+	gr := schema.GroupResource{Group: "apps", Resource: "deployments"}
+	apiErr := apierrors.NewForbidden(gr, "", errors.New("marsad cannot list deployments"))
+	fault := cluster.NewFault(apiErr, "https://api.example")
+
+	s := server.New(server.Options{
+		Source: &fixedSource{state: nil},
+		Fault:  func() *cluster.Fault { return fault },
+	})
+
+	res, body := do(t, s, http.MethodGet, "/api/health", "")
+	// Deliberately 200: the chart's liveness probe points here, and restarting
+	// the pod would take away the screen that explains why it cannot read.
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", res.StatusCode, body)
+	}
+
+	var out struct {
+		Ready bool `json:"ready"`
+		Fault struct {
+			Kind    string `json:"kind"`
+			Message string `json:"message"`
+			Host    string `json:"host"`
+		} `json:"fault"`
+		ClusterRole string `json:"clusterRole"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v — %s", err, body)
+	}
+
+	if out.Ready {
+		t.Error("ready must be false when the cluster cannot be read")
+	}
+	if out.Fault.Kind != "forbidden" {
+		t.Errorf("kind = %q, want forbidden", out.Fault.Kind)
+	}
+	if out.Fault.Message != apiErr.Error() {
+		t.Errorf("message = %q, want the error verbatim %q", out.Fault.Message, apiErr.Error())
+	}
+	if out.Fault.Host != "https://api.example" {
+		t.Errorf("host = %q", out.Fault.Host)
+	}
+
+	// The way out travels with the problem, and grants reads only.
+	if !strings.Contains(out.ClusterRole, "kind: ClusterRole") {
+		t.Fatalf("a permission fault should carry the ClusterRole:\n%s", out.ClusterRole)
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		if strings.Contains(out.ClusterRole, verb) {
+			t.Errorf("the offered ClusterRole grants %q", verb)
+		}
+	}
+}
+
+// TestHealthOffersNoClusterRoleForOtherFaults keeps the offer meaningful: an
+// unreachable API server is not fixed by applying RBAC, and suggesting it would
+// send someone to change permissions that were never the problem.
+func TestHealthOffersNoClusterRoleForOtherFaults(t *testing.T) {
+	fault := cluster.NewFault(apierrors.NewUnauthorized("expired"), "")
+	s := server.New(server.Options{
+		Source: &fixedSource{state: nil},
+		Fault:  func() *cluster.Fault { return fault },
+	})
+
+	_, body := do(t, s, http.MethodGet, "/api/health", "")
+	var out struct {
+		ClusterRole string `json:"clusterRole"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.ClusterRole != "" {
+		t.Errorf("an unauthorized fault should not offer a ClusterRole, got %q", out.ClusterRole)
+	}
+}
+
+func TestHealthIsQuietWhenNothingIsWrong(t *testing.T) {
+	_, body := do(t, testServer(t), http.MethodGet, "/api/health", "")
+	if strings.Contains(string(body), "fault") {
+		t.Errorf("a healthy server should report no fault: %s", body)
 	}
 }

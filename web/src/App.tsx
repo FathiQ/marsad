@@ -19,9 +19,11 @@ import {
   type StreamHandle,
   type StreamStatus,
   type SyncStep,
+  type Fault,
 } from './api'
 import { AppHeader } from './components/AppHeader'
 import { CanvasBar } from './components/CanvasBar'
+import { ClusterFault } from './components/ClusterFault'
 import { CommandPalette } from './components/CommandPalette'
 import { EdgePopover } from './components/EdgePopover'
 import { FilterRail } from './components/FilterRail'
@@ -116,6 +118,8 @@ export default function App() {
   const stream = useRef<StreamHandle | null>(null)
   /** Sync progress, polled only while the caches are still filling. */
   const [progress, setProgress] = useState<SyncStep[]>([])
+  /** Why the cluster cannot be read, if it cannot. */
+  const [fault, setFault] = useState<{ fault: Fault; clusterRole?: string } | null>(null)
 
   const [level, setLevel] = useState<Level>('namespace')
   const [selectedNs, setSelectedNs] = useState<string[]>([])
@@ -203,14 +207,20 @@ export default function App() {
   // that answers during cache sync, and once it stops mattering the polling
   // stops with it.
   useEffect(() => {
-    if (!syncing) return
     let cancelled = false
     const tick = () =>
       void fetchHealth()
-        .then((h) => !cancelled && setProgress(h.progress ?? []))
+        .then((h) => {
+          if (cancelled) return
+          setProgress(h.progress ?? [])
+          setFault(h.fault ? { fault: h.fault, clusterRole: h.clusterRole } : null)
+        })
         .catch(() => {})
     tick()
-    const t = window.setInterval(tick, 900)
+    // Fast while there is nothing to show, slow once there is: the commonest
+    // permission failure is found by a watch well after startup, so this cannot
+    // stop entirely — but it does not need to run every second forever.
+    const t = window.setInterval(tick, syncing ? 900 : 15_000)
     return () => {
       cancelled = true
       window.clearInterval(t)
@@ -343,6 +353,16 @@ export default function App() {
 
   // Held over the whole shell rather than over the canvas, so it continues the
   // boot screen instead of framing a half-drawn dashboard behind it.
+  if (fault) {
+    return (
+      <TooltipProvider>
+        <div className="relative h-full">
+          <ClusterFault fault={fault.fault} clusterRole={fault.clusterRole} />
+        </div>
+      </TooltipProvider>
+    )
+  }
+
   if (syncing && !graph && !error) {
     return (
       <Splash progress={progress} />

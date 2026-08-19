@@ -343,10 +343,26 @@ export interface SyncStep {
   count: number
 }
 
+/** Why Marsad cannot read the cluster. */
+export interface Fault {
+  kind: 'forbidden' | 'unauthorized' | 'unreachable' | 'other'
+  /** The API server's own words, not a summary of them. Every layer that
+   * paraphrases this is a layer that can turn one problem into a different one,
+   * and the resource and verb it named are what make it fixable. */
+  message: string
+  /** Marsad's reading of it, kept separate so it cannot be mistaken for
+   * something the cluster said. */
+  hint?: string
+  host?: string
+}
+
 export interface Health {
   ok: boolean
   ready: boolean
   progress?: SyncStep[]
+  fault?: Fault
+  /** The ClusterRole that would answer a permission failure, ready to apply. */
+  clusterRole?: string
   time: string
 }
 

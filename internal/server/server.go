@@ -36,6 +36,12 @@ type Options struct {
 	// no reason to accept cross-origin requests.
 	DevCORS bool
 
+	// Fault reports why the cluster cannot be read, or nil while it can. A
+	// function rather than a value because the commonest failure — a token that
+	// cannot list something — is discovered by a watch after the server is
+	// already up and serving.
+	Fault func() *cluster.Fault
+
 	// Version is the build this binary came from, reported by /api/meta so that
 	// "which version is running?" is answerable from the thing that is running
 	// rather than inferred from a deployment spec.
@@ -139,8 +145,17 @@ type progressSource interface {
 	Progress() []cluster.SyncStep
 }
 
+// fault reports the current cluster fault, if the binary supplied a way to ask.
+func (s *Server) fault() *cluster.Fault {
+	if s.opts.Fault == nil {
+		return nil
+	}
+	return s.opts.Fault()
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	state := s.opts.Source.State()
+	fault := s.fault()
 
 	// Reported while the caches fill, which is the one window in which every
 	// other endpoint answers 503 and someone is watching a blank screen.
@@ -149,10 +164,26 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		progress = p.Progress()
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"ok":       state != nil,
 		"ready":    state != nil && state.Snapshot != nil,
 		"progress": progress,
 		"time":     time.Now().UTC(),
-	})
+	}
+
+	// The API server's own sentence, plus the ClusterRole that would answer it.
+	// Generated from the same rule list the repo's deploy/rbac.yaml is checked
+	// against, so what is offered on screen is what actually works.
+	if fault != nil {
+		body["fault"] = fault
+		if fault.Kind == cluster.FaultForbidden {
+			body["clusterRole"] = cluster.RequiredClusterRole("marsad")
+		}
+	}
+
+	// Still 200. The probes in the chart point here, and a pod that fails its
+	// liveness check restarts — which would take away the very screen that
+	// explains why it cannot read anything. `ready` says what is true in the
+	// body instead.
+	s.writeJSON(w, http.StatusOK, body)
 }

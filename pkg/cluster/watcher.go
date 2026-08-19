@@ -80,6 +80,16 @@ type Watcher struct {
 	// that is stuck.
 	progress []syncGroup
 
+	// The last error a watch reported, kept verbatim.
+	//
+	// Preflight only asks for the server version, which most clusters allow
+	// whatever the token's RBAC says — so a credential that cannot read
+	// Deployments sails through it and fails here instead. This is where the
+	// API server actually names the resource and the verb, and that sentence is
+	// the only thing that makes a permission failure fixable.
+	faultMu sync.Mutex
+	fault   *Fault
+
 	dirty chan struct{}
 	state atomic.Pointer[State]
 	rev   atomic.Uint64
@@ -147,10 +157,36 @@ func NewWatcher(clients *Clients, caps Capabilities, log *slog.Logger) *Watcher 
 	for _, group := range append(w.progress, syncGroup{informers: plumbing}) {
 		for _, inf := range group.informers {
 			w.addHandler(inf)
+			w.watchErrors(inf)
 		}
 	}
 
 	return w
+}
+
+// watchErrors records why a watch failed, so the reason can reach a screen
+// instead of only a log line.
+func (w *Watcher) watchErrors(inf cache.SharedIndexInformer) {
+	if err := inf.SetWatchErrorHandler(func(_ *cache.Reflector, err error) {
+		w.faultMu.Lock()
+		defer w.faultMu.Unlock()
+		// First one wins. A starved token fails on every resource it watches,
+		// and the tenth message says nothing the first did not.
+		if w.fault == nil {
+			w.fault = NewFault(err, w.clients.Host)
+			w.log.Error("cannot read the cluster",
+				"kind", w.fault.Kind, "error", w.fault.Message)
+		}
+	}); err != nil {
+		w.log.Debug("could not install a watch error handler", "error", err)
+	}
+}
+
+// Fault reports why the cluster cannot be read, or nil while it can.
+func (w *Watcher) Fault() *Fault {
+	w.faultMu.Lock()
+	defer w.faultMu.Unlock()
+	return w.fault
 }
 
 // syncGroup is one line on the startup screen.

@@ -1341,3 +1341,67 @@ test('the simulate panel says what it is waiting for', async ({ page }) => {
   await expect(dialog.getByText(/Name both ends and a port/)).toBeVisible()
   await expect(dialog.getByText(/never opens a connection to find out/)).toBeVisible()
 })
+
+test('a cluster it cannot read gets the best error in the product', async ({ page }) => {
+  // The most likely first-run failure there is, and it used to happen entirely
+  // off-screen: the process exited, Kubernetes restarted it, and the
+  // explanation lived only in a pod log somebody had to know to go and read.
+  const message =
+    'deployments.apps is forbidden: User "system:serviceaccount:marsad:marsad" cannot list resource "deployments" in API group "apps" at the cluster scope'
+
+  await page.route('**/api/health', (r) =>
+    r.fulfill({
+      json: {
+        ok: false,
+        ready: false,
+        time: new Date().toISOString(),
+        fault: {
+          kind: 'forbidden',
+          message,
+          hint: 'The credentials are valid but lack permission. Marsad only ever reads: get, list and watch.',
+          host: 'https://api.example.eks.amazonaws.com',
+        },
+        clusterRole:
+          'apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: marsad\nrules:\n  - apiGroups: [apps]\n    resources: [deployments]\n    verbs: [get, list, watch]\n',
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await expect(page.getByText('Marsad is not allowed to read this cluster')).toBeVisible()
+  await expect(page.getByText('https://api.example.eks.amazonaws.com')).toBeVisible()
+
+  // Verbatim, in a block that reads as the cluster talking rather than Marsad
+  // talking about the cluster. The resource and verb it names are the only
+  // things that make this fixable.
+  await expect(page.getByText('What the API server said')).toBeVisible()
+  await expect(page.getByText(message)).toBeVisible()
+
+  // And the way out travels with the problem.
+  await expect(page.getByText('The ClusterRole it needs')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Copy' })).toBeVisible()
+  await expect(page.getByText(/this screen goes away on its own/)).toBeVisible()
+})
+
+test('an unreachable cluster is not offered a ClusterRole', async ({ page }) => {
+  // Applying RBAC does not fix a network route, and suggesting it sends someone
+  // to change permissions that were never the problem.
+  await page.route('**/api/health', (r) =>
+    r.fulfill({
+      json: {
+        ok: false,
+        ready: false,
+        time: new Date().toISOString(),
+        fault: {
+          kind: 'unreachable',
+          message: 'dial tcp 127.0.0.1:6443: connect: connection refused',
+          hint: 'The API server was unreachable.',
+        },
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await expect(page.getByText('The cluster could not be reached')).toBeVisible()
+  await expect(page.getByText('The ClusterRole it needs')).toBeHidden()
+})
