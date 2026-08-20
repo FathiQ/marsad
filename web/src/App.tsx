@@ -140,6 +140,9 @@ export default function App() {
    * which only aims the camera. One changes what is drawn; the other changes
    * where you are looking at it from. */
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
+  /** System namespaces the viewer has asked to see in full. */
+  const [expanded, setExpanded] = useState<string[]>([])
+  const [showEmpty, setShowEmpty] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [simulateOpen, setSimulateOpen] = useState(false)
 
@@ -149,8 +152,10 @@ export default function App() {
       namespaces: selectedNs,
       includeDefault,
       focus: focusNodeId ?? undefined,
+      expand: expanded,
+      includeEmpty: showEmpty,
     }),
-    [level, selectedNs, includeDefault, focusNodeId],
+    [level, selectedNs, includeDefault, focusNodeId, expanded, showEmpty],
   )
 
   const loadSummaries = useCallback(async () => {
@@ -306,12 +311,14 @@ export default function App() {
         filters.onlyUnprotected,
         filters.onlyExposed,
         focusNodeId ?? '',
+        expanded.join(','),
+        showEmpty,
         filters.hideIsolatedNodes,
         filters.hideDNS,
         [...filters.workloadKinds].sort().join(','),
         [...filters.edgeKinds].sort().join(','),
       ].join('|'),
-    [level, includeDefault, selectedNs, filters, focusNodeId],
+    [level, includeDefault, selectedNs, filters, focusNodeId, expanded, showEmpty],
   )
   const hidden = graph && filtered ? hiddenCount(graph, filtered) : 0
   const workloadKinds = useMemo(() => presentWorkloadKinds(graph), [graph])
@@ -369,6 +376,14 @@ export default function App() {
   const empty = !syncing && !error && filtered && filtered.nodes.length === 0
   // The one empty screen that is a finding rather than a void.
   const noPolicies = meta?.counts.policies === 0
+  /** Collapsed system namespaces currently on screen, for the expand-all strip. */
+  const systemNamespaces = useMemo(
+    () =>
+      (graph?.nodes ?? [])
+        .filter((n) => n.system && n.namespace)
+        .map((n) => n.namespace as string),
+    [graph],
+  )
 
   // Held over the whole shell rather than over the canvas, so it continues the
   // boot screen instead of framing a half-drawn dashboard behind it.
@@ -451,11 +466,21 @@ export default function App() {
                   theme={theme}
                   animateFlow={animateFlow}
                   showGroups={showGroups}
+                  showDefaultEdges={filters.onlyUnprotected}
                   selectedId={selectedEdge?.id ?? selectedNode?.id ?? null}
                   focusId={focusId}
                   viewToken={viewToken}
                   controls={graphControls}
                   onSelectNode={(n) => {
+                    // A collapsed system card's only useful answer is "show me
+                    // what is in it", so clicking it does that rather than
+                    // opening a panel to say it is collapsed.
+                    if (n.system && n.namespace) {
+                      setExpanded((cur) =>
+                        cur.includes(n.namespace!) ? cur : [...cur, n.namespace!],
+                      )
+                      return
+                    }
                     setSelectedNode(n)
                     setSelectedEdge(null)
                   }}
@@ -664,6 +689,74 @@ export default function App() {
                 />
               )}
             </div>
+
+            {/* Reported along the bottom rather than drawn in the middle. A
+                namespace with nothing in it has no posture and no edges, so
+                the layout puts it wherever unconnected nodes go. */}
+            {graph?.emptyNamespaces && graph.emptyNamespaces.length > 0 && (
+              <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line bg-panel px-3 py-1.5 text-[11px] text-text-dim">
+                <span>
+                  <span className="num">{graph.emptyNamespaces.length}</span>
+                  {graph.emptyNamespaces.length === 1
+                    ? ' namespace has no workloads and is not drawn'
+                    : ' namespaces have no workloads and are not drawn'}
+                </span>
+                {graph.emptyNamespaces.slice(0, 6).map((ns) => (
+                  <code
+                    key={ns}
+                    className="rounded border border-line bg-bg px-1.5 py-0.5 font-mono text-[10.5px]"
+                  >
+                    {ns}
+                  </code>
+                ))}
+                {graph.emptyNamespaces.length > 6 && (
+                  <span>and {graph.emptyNamespaces.length - 6} more</span>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setShowEmpty(true)}>
+                  Show them
+                </Button>
+              </div>
+            )}
+
+            {/* Collapsing without an obvious way back is hiding. The card
+                itself opens on click, but a viewer who has not worked that out
+                needs the option somewhere they are already looking. */}
+            {systemNamespaces.length > 0 && (
+              <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-line bg-panel px-3 py-1.5 text-[11px] text-text-dim">
+                <span>
+                  <span className="num">{systemNamespaces.length}</span>
+                  {systemNamespaces.length === 1
+                    ? ' system namespace collapsed'
+                    : ' system namespaces collapsed'}
+                </span>
+                {systemNamespaces.slice(0, 5).map((ns) => (
+                  <code
+                    key={ns}
+                    className="rounded border border-line bg-bg px-1.5 py-0.5 font-mono text-[10.5px]"
+                  >
+                    {ns}
+                  </code>
+                ))}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setExpanded((cur) => [...new Set([...cur, ...systemNamespaces])])}
+                >
+                  Expand all
+                </Button>
+              </div>
+            )}
+
+            {expanded.length > 0 && (
+              <div className="flex shrink-0 items-center gap-2 border-t border-line bg-panel px-3 py-1.5 text-[11px] text-text-dim">
+                <span>
+                  Expanded <span className="font-mono">{expanded.join(', ')}</span>
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => setExpanded([])}>
+                  Collapse again
+                </Button>
+              </div>
+            )}
 
             <CanvasBar
               onZoomIn={() => graphControls.current?.zoomIn()}

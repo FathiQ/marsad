@@ -152,6 +152,10 @@ interface Card {
   /** The counted stand-in for everything focus left out. */
   hidden?: boolean
   hiddenNamespaces?: number
+  /** Namespace cards: how many of the workloads inside are unprotected, and
+   * whether this is a collapsed system namespace. */
+  unprotectedCount: number
+  system?: boolean
   w: number
   h: number
 }
@@ -163,6 +167,9 @@ interface Edge {
   kind: GraphEdge['kind']
   /** Index of the access point this edge reaches, or -1 for the card itself. */
   accessIndex: number
+  /** The ports this edge carries, short enough for a pill. Namespace level
+   * only, where there are no card rows to carry them. */
+  portLabel?: string
 }
 
 interface Rect {
@@ -280,6 +287,8 @@ export class OverlayRenderer {
   private selected: string | null = null
   private animate = true
   private groupsVisible = true
+  private showDefaultEdges = false
+  private level: GraphData['level'] = 'namespace'
   private measurer: CanvasRenderingContext2D
 
   constructor(
@@ -291,6 +300,7 @@ export class OverlayRenderer {
 
   setData(graph: GraphData, palette: NamespacePalette) {
     this.palette = palette
+    this.level = graph.level
     const ctx = this.measurer
 
     /*
@@ -316,7 +326,17 @@ export class OverlayRenderer {
       if (e.kind === 'default') {
         openIn.add(e.target)
         openOut.add(e.source)
-        continue
+        // Drawn only when the graph has been narrowed to unprotected workloads.
+        //
+        // Then the fan-out *is* the picture: there is nothing else on screen
+        // for it to bury, and seeing every open workload converge on one point
+        // is the shape of the problem. On the full graph it is two lines per
+        // unprotected workload through a single node, carrying nothing the red
+        // ring and the card rows do not already say — which is the hairball
+        // this was folded away to avoid.
+        //
+        // Flip `this.showDefaultEdges` to draw them always.
+        if (!this.showDefaultEdges) continue
       }
       drawn.push(e)
     }
@@ -427,11 +447,14 @@ export class OverlayRenderer {
         noPolicy,
         hidden: n.hidden,
         hiddenNamespaces: n.namespaces,
+        unprotectedCount: n.unprotected ?? 0,
+        system: n.system,
         // Wider than a plain card: "any port  from anywhere" has to fit on one
         // line, because wrapping it would bury the half that says "anywhere".
         w: Math.max(w, exposureRows ? 214 : 0),
         h:
           HEADER_H +
+          (n.kind === 'namespace' && (n.workloads ?? 0) > 0 ? 8 : 0) +
           (access.length + exposureRows ? (access.length + exposureRows) * ROW_H + 6 : 0),
       }
     })
@@ -445,7 +468,17 @@ export class OverlayRenderer {
       const accessIndex = target
         ? target.access.findIndex((a) => a.label === (num ?? '') && a.kind === e.kind)
         : -1
-      return { id: e.id, source: e.source, target: e.target, kind: e.kind, accessIndex }
+      // One port reads as a fact; four read as a list nobody finishes. The
+      // rest are a click away on the edge itself.
+      const labels = e.ports ?? []
+      const portLabel =
+        labels.length === 0
+          ? undefined
+          : labels.length <= 2
+            ? labels.join(' ')
+            : `${labels[0]} +${labels.length - 1}`
+
+      return { id: e.id, source: e.source, target: e.target, kind: e.kind, accessIndex, portLabel }
     })
 
     this.edgesById = new Map(this.edges.map((e) => [e.id, e]))
@@ -479,6 +512,11 @@ export class OverlayRenderer {
   setAnimate(on: boolean) {
     this.animate = on
   }
+  /** Draw allowed-by-default edges as lines rather than only as card rows. */
+  setShowDefaultEdges(on: boolean) {
+    this.showDefaultEdges = on
+  }
+
   setGroupsVisible(on: boolean) {
     this.groupsVisible = on
   }
@@ -962,6 +1000,31 @@ export class OverlayRenderer {
         }
       }
 
+      // At namespace level an edge stands for every rule between two
+      // namespaces, and the card rows that carry ports at workload level do not
+      // exist — so without this the edge says only "something is allowed".
+      if (!dimmed && zoom > CHIP_SCALE && edge.portLabel && this.level === 'namespace') {
+        const mid = samples[Math.floor(samples.length / 2)]!
+        ctx.save()
+        ctx.font = `600 ${Math.round(10 * scale)}px ${MONO_STACK}`
+        const text = edge.portLabel
+        const tw = ctx.measureText(text).width
+        const padX = 5 * scale
+        const h = 14 * scale
+        ctx.beginPath()
+        ctx.roundRect(mid.x - tw / 2 - padX, mid.y - h / 2, tw + padX * 2, h, h / 2)
+        ctx.fillStyle = paint('plate')
+        ctx.fill()
+        ctx.strokeStyle = edgeColor(edge as unknown as GraphEdge)
+        ctx.lineWidth = 1
+        ctx.stroke()
+        ctx.fillStyle = edgeColor(edge as unknown as GraphEdge)
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(text, mid.x, mid.y)
+        ctx.restore()
+      }
+
       if (this.animate && !dimmed) {
         const style = FLOW_STYLES[edge.kind]
         const phase = (elapsed * style.speed) % 1
@@ -1066,9 +1129,11 @@ export class OverlayRenderer {
       ctx.font = `600 ${Math.round(10 * scale)}px ${SANS_STACK}`
       const badgeW = card.noPolicy
         ? ctx.measureText(NO_POLICY_LABEL).width + 14 * scale
-        : card.count > 1 && !card.hidden
+        : card.count > 1 && !card.hidden && !card.system
           ? 26 * scale
-          : 0
+          : card.system
+            ? 14 * scale
+            : 0
 
       ctx.font = `600 ${Math.round(13 * scale)}px ${SANS_STACK}`
       ctx.fillStyle = card.hidden ? muted : fg
@@ -1090,6 +1155,18 @@ export class OverlayRenderer {
           cursor,
           headerY + 13 * scale,
         )
+      } else if (card.kind === 'namespace' && card.count > 0) {
+        // "3 workloads" says how big it is. "1 of 3 unprotected" says whether
+        // anything is wrong with it, which is the question the graph exists to
+        // answer and the one a bare count leaves open.
+        const posture =
+          card.unprotectedCount > 0
+            ? `${card.unprotectedCount} of ${card.count} unprotected`
+            : `${card.count} workload${card.count === 1 ? '' : 's'}`
+        ctx.font = `500 ${Math.round(10.5 * scale)}px ${SANS_STACK}`
+        ctx.fillStyle = card.unprotectedCount > 0 ? danger : paint('faint')
+        ctx.fillText(truncate(ctx, posture, room), cursor, headerY + 13 * scale)
+
       }
 
       if (card.noPolicy) {
@@ -1110,6 +1187,15 @@ export class OverlayRenderer {
         ctx.fillStyle = danger
         ctx.textAlign = 'center'
         ctx.fillText(NO_POLICY_LABEL, bx + badgeW / 2, headerY)
+        ctx.textAlign = 'left'
+      } else if (card.system) {
+        // The affordance takes the badge's place rather than sitting on top of
+        // it: the posture line underneath already carries the count, so the
+        // number here would be saying it twice and hiding the way in.
+        ctx.font = `600 ${Math.round(13 * scale)}px ${SANS_STACK}`
+        ctx.fillStyle = paint('faint')
+        ctx.textAlign = 'right'
+        ctx.fillText('›', x + w - PAD_X * scale, headerY)
         ctx.textAlign = 'left'
       } else if (card.count > 1) {
         const bw = 22 * scale

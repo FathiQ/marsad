@@ -363,11 +363,24 @@ func TestWorkloadLevelOmitsUnusedNamespaceNodes(t *testing.T) {
 		}
 	}
 
-	// The namespace-level view still shows an empty namespace, because there it
-	// is the unit being drawn.
+	// At namespace level an empty namespace is reported rather than drawn. It
+	// has no posture to show and no edges to place it, so the layout puts it
+	// wherever unconnected nodes go — through the middle of everything else.
 	ns := graph.Build(e, graph.Options{Level: graph.LevelNamespace, IncludeDefault: false})
-	if !slices.Contains(nodeIDs(ns), "ns:empty") {
-		t.Errorf("namespace level should show empty namespaces, got %v", nodeIDs(ns))
+	if slices.Contains(nodeIDs(ns), "ns:empty") {
+		t.Errorf("an empty namespace should not be drawn by default, got %v", nodeIDs(ns))
+	}
+	if !slices.Contains(ns.EmptyNamespaces, "empty") {
+		t.Errorf("it should still be reported, got %v", ns.EmptyNamespaces)
+	}
+
+	// And drawn on request, because "not by default" must not mean "not at all".
+	shown := graph.Build(e, graph.Options{
+		Level:        graph.LevelNamespace,
+		IncludeEmpty: true,
+	})
+	if !slices.Contains(nodeIDs(shown), "ns:empty") {
+		t.Errorf("asking for empty namespaces should draw them, got %v", nodeIDs(shown))
 	}
 }
 

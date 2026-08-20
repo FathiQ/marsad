@@ -119,9 +119,21 @@ export function edgeKindCounts(
   return counts
 }
 
-/** Workloads drawn versus workloads the graph holds, for the rail's footer. */
+/**
+ * Workloads drawn versus workloads the graph holds, for the rail's footer.
+ *
+ * At namespace level there are no workload nodes — each namespace node stands
+ * for several — so counting nodes there reported "0 of 0 workloads" beside a
+ * screen full of them. The unit the footer names has to be the unit it counts.
+ */
 export function workloadCounts(original: Graph | null, filtered: Graph | null) {
-  const count = (g: Graph | null) => (g?.nodes ?? []).filter((n) => n.kind === 'workload').length
+  const count = (g: Graph | null) =>
+    (g?.nodes ?? []).reduce((sum, n) => {
+      if (n.kind === 'workload') return sum + 1
+      // A collapsed stand-in counts what it stands for, not itself.
+      if (n.kind === 'namespace') return sum + (n.workloads ?? 0)
+      return sum
+    }, 0)
   return { shown: count(filtered), total: count(original) }
 }
 

@@ -38,6 +38,10 @@ interface Props {
   theme: 'dark' | 'light'
   animateFlow: boolean
   showGroups: boolean
+  /** Draw allowed-by-default edges as lines. On only when the graph has been
+   * narrowed to unprotected workloads, where the fan-out is the picture rather
+   * than noise on top of one. */
+  showDefaultEdges: boolean
   selectedId: string | null
   focusId: string | null
   /** Changes when the user asks to see something different — a level switch, a
@@ -71,6 +75,7 @@ export function GraphCanvas({
   theme,
   animateFlow,
   showGroups,
+  showDefaultEdges,
   selectedId,
   focusId,
   viewToken,
@@ -275,6 +280,10 @@ export function GraphCanvas({
   useEffect(() => {
     overlay.current?.setGroupsVisible(showGroups)
   }, [showGroups])
+
+  useEffect(() => {
+    overlay.current?.setShowDefaultEdges(showDefaultEdges)
+  }, [showDefaultEdges])
 
   // Rebuild on data or theme change. Theme is a dependency because the card
   // colours are resolved at build time, not per frame.

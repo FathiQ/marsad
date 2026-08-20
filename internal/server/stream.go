@@ -57,7 +57,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	opts := graphOptions(r)
+	opts := s.graphOptions(r)
 
 	updates, unsubscribe := s.opts.Source.Subscribe()
 	defer unsubscribe()

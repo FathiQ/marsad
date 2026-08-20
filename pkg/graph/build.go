@@ -17,11 +17,14 @@ type builder struct {
 	opts Options
 
 	scope    map[string]bool // namespaces in view; nil means everything
+	system   map[string]bool // namespaces collapsed unless expanded
 	nodes    map[string]*Node
 	edges    map[string]*Edge
 	order    []string
 	edgeSeq  []string
 	truncate bool
+
+	emptyNamespaces []string
 }
 
 // Build renders the current evaluation as a graph.
@@ -31,10 +34,11 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 	}
 
 	b := &builder{
-		eval:  e,
-		opts:  opts,
-		nodes: map[string]*Node{},
-		edges: map[string]*Edge{},
+		eval:   e,
+		opts:   opts,
+		system: systemSet(opts.SystemNamespaces, opts.OwnNamespace),
+		nodes:  map[string]*Node{},
+		edges:  map[string]*Edge{},
 	}
 	if len(opts.Namespaces) > 0 {
 		b.scope = map[string]bool{}
@@ -51,9 +55,18 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 	// disconnected namespace nodes floating beside the workloads they contain.
 	if opts.Level == LevelNamespace {
 		for _, ns := range snap.Namespaces() {
-			if b.inScope(ns.Name) {
-				b.namespaceNode(ns.Name)
+			if !b.inScope(ns.Name) {
+				continue
 			}
+			// A namespace with nothing in it has no posture to show and no
+			// edges to place it, so it lands wherever the layout puts an
+			// unconnected node — which is through the middle of everything
+			// else. Reported instead, and drawn on request.
+			if !opts.IncludeEmpty && len(snap.Workloads(ns.Name)) == 0 {
+				b.emptyNamespaces = append(b.emptyNamespaces, ns.Name)
+				continue
+			}
+			b.namespaceNode(ns.Name)
 		}
 	}
 
@@ -65,11 +78,12 @@ func Build(e *npeval.Evaluator, opts Options) *Graph {
 	}
 
 	g := &Graph{
-		Level:      opts.Level,
-		Namespaces: opts.Namespaces,
-		Truncated:  b.truncate,
-		Nodes:      make([]Node, 0, len(b.order)),
-		Edges:      make([]Edge, 0, len(b.edgeSeq)),
+		Level:           opts.Level,
+		Namespaces:      opts.Namespaces,
+		Truncated:       b.truncate,
+		EmptyNamespaces: b.emptyNamespaces,
+		Nodes:           make([]Node, 0, len(b.order)),
+		Edges:           make([]Edge, 0, len(b.edgeSeq)),
 	}
 	for _, id := range b.order {
 		g.Nodes = append(g.Nodes, *b.nodes[id])
@@ -247,14 +261,15 @@ func (b *builder) node(id string, make func() Node) *Node {
 }
 
 func (b *builder) namespaceNode(name string) *Node {
+	system := b.isSystem(name)
 	return b.node(nsID(name), func() Node {
-		return Node{Kind: NodeNamespace, Label: name, Namespace: name}
+		return Node{Kind: NodeNamespace, Label: name, Namespace: name, System: system}
 	})
 }
 
 // clusterNodeID is the node a workload maps to at the current level.
 func (b *builder) clusterNodeID(w npeval.Workload) string {
-	if b.opts.Level == LevelWorkload && b.inScope(w.Ref.Namespace) {
+	if b.opts.Level == LevelWorkload && b.inScope(w.Ref.Namespace) && !b.isSystem(w.Ref.Namespace) {
 		return workloadID(w.Ref)
 	}
 	return nsID(w.Ref.Namespace)
@@ -264,7 +279,7 @@ func (b *builder) addWorkload(w npeval.Workload) {
 	iso := b.eval.Isolation(w.Ref)
 	id := b.clusterNodeID(w)
 
-	if b.opts.Level == LevelWorkload && b.inScope(w.Ref.Namespace) {
+	if b.opts.Level == LevelWorkload && b.inScope(w.Ref.Namespace) && !b.isSystem(w.Ref.Namespace) {
 		n := b.node(id, func() Node {
 			return Node{
 				Kind:         NodeWorkload,

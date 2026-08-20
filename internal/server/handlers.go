@@ -129,7 +129,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := graphOptions(r)
+	opts := s.graphOptions(r)
 	switch opts.Level {
 	case "", graph.LevelNamespace, graph.LevelWorkload:
 	default:
@@ -365,7 +365,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 // graphOptions reads a build request. Shared by the HTTP handler and the
 // stream, which must agree about what they are drawing or a live update would
 // silently widen a focused view.
-func graphOptions(r *http.Request) graph.Options {
+func (s *Server) graphOptions(r *http.Request) graph.Options {
 	q := r.URL.Query()
 	hops, _ := strconv.Atoi(q.Get("focusHops"))
 	return graph.Options{
@@ -374,6 +374,13 @@ func graphOptions(r *http.Request) graph.Options {
 		IncludeDefault: q.Get("includeDefault") != "false",
 		Focus:          q.Get("focus"),
 		FocusHops:      hops,
+		// Which namespaces count as system is deployment configuration, not a
+		// view setting: it is a property of the cluster, the same for everyone
+		// looking at it. Which of them are *expanded* is a view setting.
+		SystemNamespaces: s.opts.SystemNamespaces,
+		OwnNamespace:     s.opts.OwnNamespace,
+		Expand:           splitCSV(q.Get("expand")),
+		IncludeEmpty:     q.Get("includeEmpty") == "true",
 	}
 }
 

@@ -5,6 +5,7 @@ import {
   graph,
   meta,
   mockApi,
+  namespaceGraph,
   undecidableVerdict,
   worldRuleDetails,
 } from './fixtures'
@@ -1571,4 +1572,52 @@ test('the palette says which keys do what', async ({ page }) => {
   for (const hint of ['navigate', 'open', 'simulate from', 'close']) {
     await expect(dialog.getByText(hint, { exact: false }).first()).toBeVisible()
   }
+})
+
+/* ------------------------------------------------------- the namespace level */
+
+test('empty namespaces are reported, not scattered through the picture', async ({ page }) => {
+  // A namespace with nothing in it has no posture and no edges, so the layout
+  // puts it wherever unconnected nodes go — through the middle of everything.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: namespaceGraph } }),
+  )
+  await page.reload()
+
+  await expect(page.getByText(/3 namespaces have no workloads and are not drawn/)).toBeVisible()
+  await expect(page.getByText('kube-node-lease')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show them' })).toBeVisible()
+})
+
+test('asking for empty namespaces asks the server for them', async ({ page }) => {
+  // "Not by default" must not mean "not at all".
+  const asked: string[] = []
+  await page.route('**/api/graph*', (r) => {
+    asked.push(r.request().url())
+    return r.fulfill({ json: { revision: 3, graph: namespaceGraph } })
+  })
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Show them' }).click()
+  await expect
+    .poll(() => asked.some((u) => u.includes('includeEmpty=true')))
+    .toBe(true)
+})
+
+test('a collapsed system namespace can be opened again', async ({ page }) => {
+  // The collapse has to be reversible, or it is a way of hiding findings
+  // rather than of ordering them — and the way back has to be somewhere a
+  // viewer is already looking, not only on the card itself.
+  const asked: string[] = []
+  await page.route('**/api/graph*', (r) => {
+    asked.push(r.request().url())
+    return r.fulfill({ json: { revision: 3, graph: namespaceGraph } })
+  })
+  await page.reload()
+
+  await expect(page.getByText(/1 system namespace collapsed/)).toBeVisible()
+  await page.getByRole('button', { name: 'Expand all' }).click()
+
+  await expect(page.getByRole('button', { name: 'Collapse again' })).toBeVisible()
+  await expect.poll(() => asked.some((u) => u.includes('expand=kube-system'))).toBe(true)
 })

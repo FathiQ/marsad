@@ -27,6 +27,26 @@ import (
 // what it was, which turned "is this the fixed build?" into guesswork twice.
 var version = "dev"
 
+// parseSystemNamespaces reads the flag, distinguishing three cases that a bare
+// slice cannot: unset (use the built-in list), "-" (collapse nothing), and an
+// explicit list. Without the middle one there would be no way to say "show me
+// everything, always" short of naming every namespace you do not have.
+func parseSystemNamespaces(v string) []string {
+	switch strings.TrimSpace(v) {
+	case "":
+		return nil
+	case "-":
+		return []string{}
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // firstFault prefers whichever failure actually happened first: preflight runs
 // before any watch, so if it found something the watch errors are consequences.
 func firstFault(preflight, watch *cluster.Fault) *cluster.Fault {
@@ -51,6 +71,15 @@ func run() error {
 		combineMode = flag.String("combine", "intersect",
 			"how policy layers from different providers combine: intersect (a pod must satisfy every layer) or union")
 		devCORS = flag.Bool("dev-cors", false, "allow cross-origin requests, for running the Vite dev server separately")
+
+		// What counts as "system" is a local judgement — a platform team's own
+		// namespace is system to the application teams and the whole job to them —
+		// so it is configuration rather than a fixed list. An explicitly empty
+		// value collapses nothing.
+		systemNamespaces = flag.String("system-namespaces", "",
+			"comma-separated namespaces to collapse in the graph by default; empty uses the built-in list, \"-\" collapses none")
+		ownNamespace = flag.String("namespace", os.Getenv("POD_NAMESPACE"),
+			"the namespace Marsad runs in, collapsed along with the system ones")
 	)
 	flag.Parse()
 
@@ -117,6 +146,9 @@ func run() error {
 			DevCORS:     *devCORS,
 			Version:     version,
 			Fault:       func() *cluster.Fault { return firstFault(fault, watcher.Fault()) },
+
+			SystemNamespaces: parseSystemNamespaces(*systemNamespaces),
+			OwnNamespace:     *ownNamespace,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

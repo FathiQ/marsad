@@ -30,6 +30,9 @@ export interface GraphNode {
   /** Set on the counted stand-in for everything focus left out. */
   hidden?: boolean
   namespaces?: number
+  /** A namespace collapsed because nobody asked about it. Counted and
+   * expandable, not hidden. */
+  system?: boolean
   /** Namespace nodes only: how many workloads are aggregated, and how many of
    * them no policy selects at all. */
   workloads?: number
@@ -78,6 +81,9 @@ export interface Graph {
   truncated?: boolean
   focus?: FocusInfo
   oversize?: Oversize
+  /** Namespaces holding no workloads. Reported rather than drawn: they have no
+   * posture and would float as unconnected nodes through the middle. */
+  emptyNamespaces?: string[]
 }
 
 export interface ObjectRef {
@@ -332,6 +338,10 @@ export interface GraphQuery {
   /** Node id to reduce the graph around. Empty draws everything. */
   focus?: string
   focusHops?: number
+  /** System namespaces to draw in full despite the collapse. */
+  expand?: string[]
+  /** Draw namespaces holding no workloads. */
+  includeEmpty?: boolean
 }
 
 export function graphParams(q: GraphQuery): string {
@@ -340,6 +350,8 @@ export function graphParams(q: GraphQuery): string {
   if (!q.includeDefault) p.set('includeDefault', 'false')
   if (q.focus) p.set('focus', q.focus)
   if (q.focusHops) p.set('focusHops', String(q.focusHops))
+  if (q.expand?.length) p.set('expand', q.expand.join(','))
+  if (q.includeEmpty) p.set('includeEmpty', 'true')
   return p.toString()
 }
 

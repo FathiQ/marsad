@@ -36,10 +36,21 @@ spec:
         - name: marsad
           image: {{ include "marsad.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # So Marsad can collapse its own namespace without being told where
+            # it is running by a value that can drift from reality.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           args:
             - -addr=:8080
             - -log-level={{ .Values.config.logLevel }}
             - -combine={{ .Values.config.combineMode }}
+            {{- with .Values.config.systemNamespaces }}
+            - -system-namespaces={{ join "," . }}
+            {{- end }}
+            - -namespace=$(POD_NAMESPACE)
             {{- with .Values.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

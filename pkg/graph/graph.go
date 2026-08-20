@@ -101,6 +101,10 @@ type Node struct {
 	// being shown, rather than as nothing at all.
 	Namespaces int  `json:"namespaces,omitempty"`
 	Hidden     bool `json:"hidden,omitempty"`
+
+	// System marks a namespace collapsed because nobody asked about it: drawn
+	// as a quiet counted card rather than expanded, and expandable.
+	System bool `json:"system,omitempty"`
 }
 
 // Edge is one directed allowance, from source to target.
@@ -134,6 +138,11 @@ type Graph struct {
 	// graph legible. Never silently: the UI says so.
 	Truncated bool `json:"truncated,omitempty"`
 
+	// EmptyNamespaces hold no workloads at all. Reported rather than drawn:
+	// they have no posture to show and would float as unconnected nodes through
+	// the middle of the picture.
+	EmptyNamespaces []string `json:"emptyNamespaces,omitempty"`
+
 	// Focus is set when the build was reduced to a neighbourhood, and carries
 	// what was excluded so the UI can say so rather than implying the cluster
 	// is this size.
@@ -160,6 +169,19 @@ type Options struct {
 	// of policy. On a cluster with no policies at all this is every workload, so
 	// it can be turned off.
 	IncludeDefault bool
+
+	// SystemNamespaces are collapsed to a single counted node each. Nil means
+	// DefaultSystemNamespaces; an explicitly empty slice means none.
+	SystemNamespaces []string
+	// OwnNamespace is where Marsad itself runs, collapsed for the same reason.
+	OwnNamespace string
+	// Expand names namespaces to draw in full despite being system. The
+	// collapse has to be reversible, or it is a way of hiding findings.
+	Expand []string
+	// IncludeEmpty draws namespaces holding no workloads. Off by default: they
+	// have no posture and float as unconnected nodes, so they are reported
+	// separately instead of scattered through the picture.
+	IncludeEmpty bool
 
 	// Focus reduces the graph to a node's neighbourhood. Empty draws everything.
 	//

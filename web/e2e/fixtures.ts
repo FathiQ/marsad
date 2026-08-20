@@ -36,6 +36,43 @@ export const namespaces = [
   { name: 'edge', workloads: 1, policies: 0, unprotected: 1 },
 ]
 
+/** The namespace-level view, where posture and port pills live. */
+export const namespaceGraph = {
+  level: 'namespace',
+  nodes: [
+    {
+      id: 'ns:prod',
+      kind: 'namespace',
+      label: 'prod',
+      namespace: 'prod',
+      workloads: 3,
+      unprotected: 1,
+      isolation: { ingress: false, egress: true },
+    },
+    {
+      id: 'ns:kube-system',
+      kind: 'namespace',
+      label: 'kube-system',
+      namespace: 'kube-system',
+      workloads: 4,
+      unprotected: 4,
+      system: true,
+      isolation: { ingress: false, egress: false },
+    },
+  ],
+  edges: [
+    {
+      id: 'ns:prod|ns:kube-system|allowed',
+      source: 'ns:prod',
+      target: 'ns:kube-system',
+      kind: 'allowed',
+      ports: ['53/UDP'],
+      via: ['networking.k8s.io/NetworkPolicy/prod/dns#egress[0]'],
+    },
+  ],
+  emptyNamespaces: ['default', 'kube-node-lease', 'kube-public'],
+}
+
 export const graph = {
   level: 'workload',
   nodes: [
