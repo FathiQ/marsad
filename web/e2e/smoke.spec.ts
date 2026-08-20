@@ -5,6 +5,7 @@ import {
   graph,
   meta,
   mockApi,
+  namespaceGraph,
   undecidableVerdict,
   worldRuleDetails,
 } from './fixtures'
@@ -1406,6 +1407,112 @@ test('an unreachable cluster is not offered a ClusterRole', async ({ page }) => 
   await expect(page.getByText('The ClusterRole it needs')).toBeHidden()
 })
 
+/* ------------------------------------------------------------------- scale */
+
+const manyNodes = (n: number) => ({
+  level: 'workload',
+  nodes: Array.from({ length: n }, (_, i) => ({
+    id: `wl:corp/Deployment/svc-${i}`,
+    kind: 'workload',
+    label: `svc-${i}`,
+    namespace: 'corp',
+    workloadKind: 'Deployment',
+    replicas: 1,
+    isolation: { ingress: i % 3 !== 0, egress: true },
+  })),
+  edges: [],
+})
+
+test('a graph too large to read is refused, not shipped', async ({ page }) => {
+  // Past the limit the layout is a hairball no amount of panning recovers, and
+  // sending it only moves the discovery to the browser.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: { level: 'workload', nodes: [], edges: [], oversize: { nodes: 400, limit: 220 } },
+      },
+    }),
+  )
+  await page.reload()
+
+  await expect(page.getByText('Too much to draw at once')).toBeVisible()
+  await expect(page.getByText(/400/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Search for a workload' })).toBeVisible()
+})
+
+test('a focused graph says how much it is not showing', async ({ page }) => {
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({
+      json: {
+        revision: 3,
+        graph: {
+          ...manyNodes(14),
+          focus: {
+            node: 'wl:corp/Deployment/svc-0',
+            hops: 2,
+            namespaces: 9,
+            totalNamespaces: 42,
+            workloads: 14,
+            totalWorkloads: 96,
+            hidden: 82,
+          },
+        },
+      },
+    }),
+  )
+  await page.reload()
+
+  await expect(page.getByText(/Focused on/)).toBeVisible()
+  await expect(page.getByText(/9 of 42 namespaces drawn/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Clear focus' })).toBeVisible()
+})
+
+test('the minimap appears once there is enough graph to get lost in', async ({ page }) => {
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: manyNodes(20) } }),
+  )
+  await page.reload()
+  await expect(page.getByLabel('Minimap')).toBeVisible()
+})
+
+test('the rail can be filtered, and says when nothing matches', async ({ page }) => {
+  await page.route('**/api/namespaces', (r) =>
+    r.fulfill({
+      json: Array.from({ length: 8 }, (_, i) => ({
+        name: `ns-${i}`,
+        workloads: 2,
+        policies: 1,
+        unprotected: 0,
+      })),
+    }),
+  )
+  await page.reload()
+
+  const rail = page.getByRole('complementary')
+  const field = rail.getByLabel('Filter namespaces')
+  await expect(field).toBeVisible()
+
+  await field.fill('ns-3')
+  await expect(rail.getByRole('button', { name: /ns-3/ })).toBeVisible()
+  await expect(rail.getByRole('button', { name: /ns-4/ })).toBeHidden()
+
+  await field.fill('nothing-like-this')
+  await expect(rail.getByText('No namespace matches.')).toBeVisible()
+})
+
+test('only-reachable-from-outside is its own question', async ({ page }) => {
+  // Distinct from unprotected: a workload can be selected by policies and still
+  // accept from 0.0.0.0/0, which is a decision somebody made rather than one
+  // nobody did.
+  await page.getByRole('button', { name: 'Filters' }).click()
+  const row = page.getByText('Only reachable from outside')
+  await expect(row).toBeVisible()
+
+  await row.click()
+  await expect(page.getByText(/Filters are hiding part of this/)).toBeVisible()
+})
+
 /* -------------------------------------------------------------- the palette */
 
 test('one entry in the header, not two', async ({ page }) => {
@@ -1465,4 +1572,52 @@ test('the palette says which keys do what', async ({ page }) => {
   for (const hint of ['navigate', 'open', 'simulate from', 'close']) {
     await expect(dialog.getByText(hint, { exact: false }).first()).toBeVisible()
   }
+})
+
+/* ------------------------------------------------------- the namespace level */
+
+test('empty namespaces are reported, not scattered through the picture', async ({ page }) => {
+  // A namespace with nothing in it has no posture and no edges, so the layout
+  // puts it wherever unconnected nodes go — through the middle of everything.
+  await page.route('**/api/graph*', (r) =>
+    r.fulfill({ json: { revision: 3, graph: namespaceGraph } }),
+  )
+  await page.reload()
+
+  await expect(page.getByText(/3 namespaces have no workloads and are not drawn/)).toBeVisible()
+  await expect(page.getByText('kube-node-lease')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Show them' })).toBeVisible()
+})
+
+test('asking for empty namespaces asks the server for them', async ({ page }) => {
+  // "Not by default" must not mean "not at all".
+  const asked: string[] = []
+  await page.route('**/api/graph*', (r) => {
+    asked.push(r.request().url())
+    return r.fulfill({ json: { revision: 3, graph: namespaceGraph } })
+  })
+  await page.reload()
+
+  await page.getByRole('button', { name: 'Show them' }).click()
+  await expect
+    .poll(() => asked.some((u) => u.includes('includeEmpty=true')))
+    .toBe(true)
+})
+
+test('a collapsed system namespace can be opened again', async ({ page }) => {
+  // The collapse has to be reversible, or it is a way of hiding findings
+  // rather than of ordering them — and the way back has to be somewhere a
+  // viewer is already looking, not only on the card itself.
+  const asked: string[] = []
+  await page.route('**/api/graph*', (r) => {
+    asked.push(r.request().url())
+    return r.fulfill({ json: { revision: 3, graph: namespaceGraph } })
+  })
+  await page.reload()
+
+  await expect(page.getByText(/1 system namespace collapsed/)).toBeVisible()
+  await page.getByRole('button', { name: 'Expand all' }).click()
+
+  await expect(page.getByRole('button', { name: 'Collapse again' })).toBeVisible()
+  await expect.poll(() => asked.some((u) => u.includes('expand=kube-system'))).toBe(true)
 })

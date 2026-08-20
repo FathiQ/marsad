@@ -148,7 +148,15 @@ export function FilterRail({
   onReset,
 }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const { populated, empty } = useMemo(() => partition(namespaces), [namespaces])
+  const [query, setQuery] = useState('')
+
+  // Typing beats scrolling past forty entries, and the list is the primary
+  // navigation on a large cluster.
+  const matching = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? namespaces.filter((ns) => ns.name.toLowerCase().includes(q)) : namespaces
+  }, [namespaces, query])
+  const { populated, empty } = useMemo(() => partition(matching), [matching])
 
   const setEdgeKind = (kind: EdgeKind, on: boolean) => {
     const next = new Set(filters.edgeKinds)
@@ -243,9 +251,21 @@ export function FilterRail({
             )}
           </div>
 
+          {namespaces.length > 5 && (
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter namespaces"
+              aria-label="Filter namespaces"
+              className="mt-2 h-7 w-full rounded-md border border-line bg-bg px-2 text-[12px] text-fg outline-none placeholder:text-text-dim focus-visible:border-accent/60"
+            />
+          )}
+
           <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-lg border border-line bg-bg">
-            {namespaces.length === 0 ? (
-              <p className="px-2.5 py-3 text-[12px] text-text-dim">No namespaces yet.</p>
+            {matching.length === 0 ? (
+              <p className="px-2.5 py-3 text-[12px] text-text-dim">
+                {namespaces.length === 0 ? 'No namespaces yet.' : 'No namespace matches.'}
+              </p>
             ) : (
               <div className="flex h-full flex-col">
                 <div className="min-h-0 flex-1">
@@ -338,6 +358,12 @@ export function FilterRail({
                   onChange={(v) => onFilters({ ...filters, onlyUnprotected: v })}
                   label="Only unprotected"
                   hint="Show only workloads that no policy selects at all."
+                />
+                <Row
+                  checked={filters.onlyExposed}
+                  onChange={(v) => onFilters({ ...filters, onlyExposed: v })}
+                  label="Only reachable from outside"
+                  hint="Workloads something outside the cluster can reach, following the direction traffic flows. Being able to call the internet is not the same thing — that would be every workload with egress."
                 />
                 <Row
                   checked={filters.hideIsolatedNodes}

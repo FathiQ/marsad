@@ -36,6 +36,12 @@ type Options struct {
 	// no reason to accept cross-origin requests.
 	DevCORS bool
 
+	// SystemNamespaces are collapsed in the graph by default. Nil uses
+	// graph.DefaultSystemNamespaces; an explicitly empty slice collapses
+	// nothing. OwnNamespace is where Marsad itself runs.
+	SystemNamespaces []string
+	OwnNamespace     string
+
 	// Fault reports why the cluster cannot be read, or nil while it can. A
 	// function rather than a value because the commonest failure — a token that
 	// cannot list something — is discovered by a watch after the server is

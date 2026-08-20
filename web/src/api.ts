@@ -21,6 +21,18 @@ export interface GraphNode {
   workloadKind?: string
   replicas?: number
   isolation?: Isolation
+  /** Something outside the cluster can reach this, following edges the way
+   * traffic flows. Being able to *call* the internet is not the same thing, and
+   * conflating them would mark every workload with egress as exposed. */
+  exposed?: boolean
+  /** A CIDR peer outside any private range. */
+  public?: boolean
+  /** Set on the counted stand-in for everything focus left out. */
+  hidden?: boolean
+  namespaces?: number
+  /** A namespace collapsed because nobody asked about it. Counted and
+   * expandable, not hidden. */
+  system?: boolean
   /** Namespace nodes only: how many workloads are aggregated, and how many of
    * them no policy selects at all. */
   workloads?: number
@@ -43,6 +55,23 @@ export interface GraphEdge {
   note?: string
 }
 
+/** What a focused build drew, and what it left out. */
+export interface FocusInfo {
+  node: string
+  hops: number
+  namespaces: number
+  totalNamespaces: number
+  workloads: number
+  totalWorkloads: number
+  hidden: number
+}
+
+/** A graph that was not drawn because drawing it would be unreadable. */
+export interface Oversize {
+  nodes: number
+  limit: number
+}
+
 export interface Graph {
   level: Level
   namespaces?: string[]
@@ -50,6 +79,11 @@ export interface Graph {
   edges: GraphEdge[]
   /** Peers were collapsed to keep the graph legible. Never hidden silently. */
   truncated?: boolean
+  focus?: FocusInfo
+  oversize?: Oversize
+  /** Namespaces holding no workloads. Reported rather than drawn: they have no
+   * posture and would float as unconnected nodes through the middle. */
+  emptyNamespaces?: string[]
 }
 
 export interface ObjectRef {
@@ -301,12 +335,23 @@ export interface GraphQuery {
   level: Level
   namespaces: string[]
   includeDefault: boolean
+  /** Node id to reduce the graph around. Empty draws everything. */
+  focus?: string
+  focusHops?: number
+  /** System namespaces to draw in full despite the collapse. */
+  expand?: string[]
+  /** Draw namespaces holding no workloads. */
+  includeEmpty?: boolean
 }
 
 export function graphParams(q: GraphQuery): string {
   const p = new URLSearchParams({ level: q.level })
   if (q.namespaces.length) p.set('namespaces', q.namespaces.join(','))
   if (!q.includeDefault) p.set('includeDefault', 'false')
+  if (q.focus) p.set('focus', q.focus)
+  if (q.focusHops) p.set('focusHops', String(q.focusHops))
+  if (q.expand?.length) p.set('expand', q.expand.join(','))
+  if (q.includeEmpty) p.set('includeEmpty', 'true')
   return p.toString()
 }
 

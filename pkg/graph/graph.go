@@ -85,6 +85,26 @@ type Node struct {
 	Workloads int `json:"workloads,omitempty"`
 	// Unprotected is how many of them no policy selects at all.
 	Unprotected int `json:"unprotected,omitempty"`
+
+	// Exposed marks a cluster node something outside the cluster can reach,
+	// following edges the way traffic flows. Computed here rather than in the
+	// browser so "reachable from outside" means one thing, tested once.
+	Exposed bool `json:"exposed,omitempty"`
+
+	// Public marks a CIDR peer outside any private range. A rule naming a
+	// 10.0.0.0/8 block is somebody's VPC; one naming a routable range is the
+	// internet, and only the second makes a workload reachable from outside.
+	Public bool `json:"public,omitempty"`
+
+	// Namespaces and Hidden are set on a cluster node — the counted stand-in
+	// for everything focus left out. Drawn as one card saying how much is not
+	// being shown, rather than as nothing at all.
+	Namespaces int  `json:"namespaces,omitempty"`
+	Hidden     bool `json:"hidden,omitempty"`
+
+	// System marks a namespace collapsed because nobody asked about it: drawn
+	// as a quiet counted card rather than expanded, and expandable.
+	System bool `json:"system,omitempty"`
 }
 
 // Edge is one directed allowance, from source to target.
@@ -117,6 +137,27 @@ type Graph struct {
 	// Truncated is set when peers were collapsed to namespace nodes to keep the
 	// graph legible. Never silently: the UI says so.
 	Truncated bool `json:"truncated,omitempty"`
+
+	// EmptyNamespaces hold no workloads at all. Reported rather than drawn:
+	// they have no posture to show and would float as unconnected nodes through
+	// the middle of the picture.
+	EmptyNamespaces []string `json:"emptyNamespaces,omitempty"`
+
+	// Focus is set when the build was reduced to a neighbourhood, and carries
+	// what was excluded so the UI can say so rather than implying the cluster
+	// is this size.
+	Focus *Focus `json:"focus,omitempty"`
+
+	// Oversize is set when the graph is too large to draw legibly and was not
+	// drawn. Nodes and Edges are empty; Counts says what would have been there.
+	Oversize *Oversize `json:"oversize,omitempty"`
+}
+
+// Oversize reports a graph that was not drawn because drawing it would have
+// produced something nobody can read.
+type Oversize struct {
+	Nodes int `json:"nodes"`
+	Limit int `json:"limit"`
 }
 
 // Options configures a build.
@@ -128,6 +169,48 @@ type Options struct {
 	// of policy. On a cluster with no policies at all this is every workload, so
 	// it can be turned off.
 	IncludeDefault bool
+
+	// SystemNamespaces are collapsed to a single counted node each. Nil means
+	// DefaultSystemNamespaces; an explicitly empty slice means none.
+	SystemNamespaces []string
+	// OwnNamespace is where Marsad itself runs, collapsed for the same reason.
+	OwnNamespace string
+	// Expand names namespaces to draw in full despite being system. The
+	// collapse has to be reversible, or it is a way of hiding findings.
+	Expand []string
+	// IncludeEmpty draws namespaces holding no workloads. Off by default: they
+	// have no posture and float as unconnected nodes, so they are reported
+	// separately instead of scattered through the picture.
+	IncludeEmpty bool
+
+	// Focus reduces the graph to a node's neighbourhood. Empty draws everything.
+	//
+	// At 200 workloads across 40 namespaces the whole picture is not a picture,
+	// and the honest response is to draw the part somebody asked about and say
+	// plainly how much was left out — rather than to draw all of it and let them
+	// discover it is unreadable.
+	Focus string
+	// FocusHops is how far the neighbourhood extends. Zero means the default.
+	FocusHops int
+}
+
+// DefaultFocusHops is how far focus reaches when no distance is given. Two: one
+// hop is what a node talks to, which the inspector already lists, and the first
+// thing a graph adds is what *those* talk to.
+const DefaultFocusHops = 2
+
+// Focus describes what a focused build drew and what it left out.
+type Focus struct {
+	Node string `json:"node"`
+	Hops int    `json:"hops"`
+	// Namespaces drawn, out of how many the unfocused graph would have held.
+	Namespaces      int `json:"namespaces"`
+	TotalNamespaces int `json:"totalNamespaces"`
+	// Workloads and their total, for the same reason.
+	Workloads      int `json:"workloads"`
+	TotalWorkloads int `json:"totalWorkloads"`
+	// Hidden is how many nodes were folded into cluster nodes.
+	Hidden int `json:"hidden"`
 }
 
 func nsID(name string) string { return "ns:" + name }
@@ -189,4 +272,26 @@ func shortLabel(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// isPublic reports whether a prefix is routable on the internet.
+//
+// Judged from the prefix's own address rather than from a list of ranges to
+// recognise: a rule naming 10.0.0.0/8 is somebody's VPC, and treating that as
+// "the internet" would mark half a cluster as externally reachable and make the
+// finding worthless.
+func isPublic(p netip.Prefix) bool {
+	if !p.IsValid() {
+		return false
+	}
+	addr := p.Addr()
+	switch {
+	case addr.IsPrivate(), addr.IsLoopback(), addr.IsLinkLocalUnicast(),
+		addr.IsLinkLocalMulticast(), addr.IsUnspecified() && p.Bits() != 0:
+		return false
+	}
+	// 0.0.0.0/0 and ::/0 are the whole internet, and are drawn as the world
+	// node rather than as a CIDR — but a caller asking whether the prefix is
+	// public should still be told yes.
+	return true
 }

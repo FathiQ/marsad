@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/FathiQ/marsad/pkg/graph"
+	"github.com/FathiQ/marsad/pkg/npeval"
 )
 
 // streamMessage is what the client receives on each cluster change.
@@ -56,11 +57,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	opts := graph.Options{
-		Level:          graph.Level(r.URL.Query().Get("level")),
-		Namespaces:     splitCSV(r.URL.Query().Get("namespaces")),
-		IncludeDefault: r.URL.Query().Get("includeDefault") != "false",
-	}
+	opts := s.graphOptions(r)
 
 	updates, unsubscribe := s.opts.Source.Subscribe()
 	defer unsubscribe()
@@ -71,7 +68,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		if err := s.send(ctx, conn, streamMessage{
 			Type:     "graph",
 			Revision: state.Revision,
-			Graph:    graph.Build(e, opts),
+			Graph:    buildForStream(e, opts),
 			Warnings: len(state.Warnings),
 		}); err != nil {
 			return
@@ -115,7 +112,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			if err := s.send(ctx, conn, streamMessage{
 				Type:     "graph",
 				Revision: state.Revision,
-				Graph:    graph.Build(e, opts),
+				Graph:    buildForStream(e, opts),
 				Warnings: len(state.Warnings),
 			}); err != nil {
 				return
@@ -135,4 +132,13 @@ func (s *Server) send(ctx context.Context, conn *websocket.Conn, msg streamMessa
 		return err
 	}
 	return nil
+}
+
+// buildForStream applies the same size refusal the HTTP handler does. A live
+// update that quietly delivers a hairball the initial fetch refused would be a
+// worse outcome than either.
+func buildForStream(e *npeval.Evaluator, opts graph.Options) *graph.Graph {
+	g := graph.Build(e, opts)
+	g.Oversized()
+	return g
 }

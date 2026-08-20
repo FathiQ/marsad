@@ -42,6 +42,18 @@ service:
 config:
   # debug, info, warn or error.
   logLevel: info
+  # Namespaces the graph collapses to a single counted card by default.
+  #
+  # Not hidden: still counted, still expandable, still searchable. Collapsed
+  # because on most clusters they hold the only unprotected workloads there
+  # are, and the headline signal is worth less when it points at infrastructure
+  # nobody is going to write a NetworkPolicy for.
+  #
+  # Unset uses the built-in list (kube-system, kube-public, kube-node-lease and
+  # friends). Marsad's own namespace is always included. Set to ["-"] to
+  # collapse nothing.
+  systemNamespaces: []
+
   # How NetworkPolicy and ApplicationNetworkPolicy layers combine: intersect or
   # union. Intersect is the conservative reading — a connection is shown as
   # allowed only if both layers permit it — and matches the AWS CRD's own field

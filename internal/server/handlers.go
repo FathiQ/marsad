@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -128,11 +129,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := graph.Options{
-		Level:          graph.Level(r.URL.Query().Get("level")),
-		Namespaces:     splitCSV(r.URL.Query().Get("namespaces")),
-		IncludeDefault: r.URL.Query().Get("includeDefault") != "false",
-	}
+	opts := s.graphOptions(r)
 	switch opts.Level {
 	case "", graph.LevelNamespace, graph.LevelWorkload:
 	default:
@@ -142,6 +139,11 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g := graph.Build(e, opts)
+	// Refused rather than sent: past the limit the layout is a hairball no
+	// amount of panning recovers, and shipping it only moves the discovery to
+	// the browser.
+	g.Oversized()
+
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"revision": state.Revision,
 		"graph":    g,
@@ -358,6 +360,28 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, verdict)
+}
+
+// graphOptions reads a build request. Shared by the HTTP handler and the
+// stream, which must agree about what they are drawing or a live update would
+// silently widen a focused view.
+func (s *Server) graphOptions(r *http.Request) graph.Options {
+	q := r.URL.Query()
+	hops, _ := strconv.Atoi(q.Get("focusHops"))
+	return graph.Options{
+		Level:          graph.Level(q.Get("level")),
+		Namespaces:     splitCSV(q.Get("namespaces")),
+		IncludeDefault: q.Get("includeDefault") != "false",
+		Focus:          q.Get("focus"),
+		FocusHops:      hops,
+		// Which namespaces count as system is deployment configuration, not a
+		// view setting: it is a property of the cluster, the same for everyone
+		// looking at it. Which of them are *expanded* is a view setting.
+		SystemNamespaces: s.opts.SystemNamespaces,
+		OwnNamespace:     s.opts.OwnNamespace,
+		Expand:           splitCSV(q.Get("expand")),
+		IncludeEmpty:     q.Get("includeEmpty") == "true",
+	}
 }
 
 func splitCSV(s string) []string {

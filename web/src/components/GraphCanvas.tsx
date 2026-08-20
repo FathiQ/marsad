@@ -4,7 +4,7 @@ import Sigma from 'sigma'
 
 import type { Graph as GraphData, GraphEdge, GraphNode } from '../api'
 import { OverlayRenderer } from '../graph/overlay'
-import type { NamespacePalette } from '../graph/style'
+import { isUnprotected, type NamespacePalette } from '../graph/style'
 import type { LayoutResult } from '../graph/layout.worker'
 
 /**
@@ -19,6 +19,17 @@ export interface GraphControls {
   zoomOut: () => void
   /** Back to the framing the fit chose, not to Sigma's arbitrary default. */
   fit: () => void
+  /** Where everything is, and which part of it is on screen. For the minimap,
+   * which has to show what is *not* in view — that being the whole point. */
+  snapshot: () => MinimapSnapshot | null
+  /** Move the camera to a point in graph space. */
+  panTo: (x: number, y: number) => void
+}
+
+export interface MinimapSnapshot {
+  nodes: { x: number; y: number; danger: boolean }[]
+  /** The viewport, in the same graph coordinates as the nodes. */
+  view: { x0: number; y0: number; x1: number; y1: number }
 }
 
 interface Props {
@@ -27,6 +38,10 @@ interface Props {
   theme: 'dark' | 'light'
   animateFlow: boolean
   showGroups: boolean
+  /** Draw allowed-by-default edges as lines. On only when the graph has been
+   * narrowed to unprotected workloads, where the fan-out is the picture rather
+   * than noise on top of one. */
+  showDefaultEdges: boolean
   selectedId: string | null
   focusId: string | null
   /** Changes when the user asks to see something different — a level switch, a
@@ -60,6 +75,7 @@ export function GraphCanvas({
   theme,
   animateFlow,
   showGroups,
+  showDefaultEdges,
   selectedId,
   focusId,
   viewToken,
@@ -88,6 +104,8 @@ export function GraphCanvas({
    * to Sigma's default of ratio 1 — which on a small graph is a magnification
    * nobody asked for. */
   const lastFit = useRef<{ x: number; y: number; ratio: number } | null>(null)
+  /** Which nodes are a finding, so the minimap can keep them red off screen. */
+  const dangerIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (!container.current || !canvas.current) return
@@ -127,6 +145,39 @@ export function GraphCanvas({
           const to = lastFit.current
           if (to) renderer.getCamera().animate(to, { duration: 320 })
           else renderer.getCamera().animatedReset({ duration: 320 })
+        },
+        snapshot: () => {
+          const g = graph.current
+          if (!g.order) return null
+
+          const nodes: MinimapSnapshot['nodes'] = []
+          g.forEachNode((id, attrs) => {
+            nodes.push({
+              x: attrs.x as number,
+              y: attrs.y as number,
+              // Read from the node data, not from what the overlay currently
+              // paints: a dot for an unprotected workload has to stay red when
+              // the workload is off screen, which is exactly when it matters.
+              danger: dangerIds.current.has(id),
+            })
+          })
+
+          const { width, height } = renderer.getDimensions()
+          const topLeft = renderer.viewportToGraph({ x: 0, y: 0 })
+          const bottomRight = renderer.viewportToGraph({ x: width, y: height })
+          return {
+            nodes,
+            view: {
+              x0: Math.min(topLeft.x, bottomRight.x),
+              y0: Math.min(topLeft.y, bottomRight.y),
+              x1: Math.max(topLeft.x, bottomRight.x),
+              y1: Math.max(topLeft.y, bottomRight.y),
+            },
+          }
+        },
+        panTo: (x, y) => {
+          userMoved.current = true
+          renderer.getCamera().animate({ x, y }, { duration: 260 })
         },
       }
     }
@@ -230,6 +281,10 @@ export function GraphCanvas({
     overlay.current?.setGroupsVisible(showGroups)
   }, [showGroups])
 
+  useEffect(() => {
+    overlay.current?.setShowDefaultEdges(showDefaultEdges)
+  }, [showDefaultEdges])
+
   // Rebuild on data or theme change. Theme is a dependency because the card
   // colours are resolved at build time, not per frame.
   useEffect(() => {
@@ -241,6 +296,7 @@ export function GraphCanvas({
     g.forEachNode((id, attrs) => previous.set(id, { x: attrs.x as number, y: attrs.y as number }))
 
     nodeIndex.current = new Map(data.nodes.map((n) => [n.id, n]))
+    dangerIds.current = new Set(data.nodes.filter(isUnprotected).map((n) => n.id))
     edgeIndex.current = new Map(data.edges.map((e) => [e.id, e]))
     over.setData(data, palette)
 
